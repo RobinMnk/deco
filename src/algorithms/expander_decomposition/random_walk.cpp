@@ -34,7 +34,7 @@ void RandomWalk::iterate(const Partition& part, const std::vector<NodeIx>& activ
         }
     }
 
-    m_distribution *= (1.0f - rw_stay);
+    m_distribution *= (1.0 - rw_stay);
     m_distribution += rw_stay * m_old_distribution;
 }
 

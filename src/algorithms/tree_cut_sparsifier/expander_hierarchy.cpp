@@ -25,6 +25,7 @@ ExpanderHierarchy::Level ExpanderHierarchy::contract(Partition& part) const {
         }
         for (const ClusterVertex& cv: cluster) {
             clusterLookup[cv.nix] = nix;
+            // assert(clusterLookup[cv.nix] == part.cvForNix(cv.nix)); // TODO: clusterLookup is redundant with Partition.lookup ?
             if constexpr (!first) {
                 volumes[nix] += levels.back().volumes[cv.nix];
             }
@@ -60,6 +61,46 @@ ExpanderHierarchy::Level ExpanderHierarchy::contract(Partition& part) const {
 }
 
 ExpanderHierarchy::ExpanderHierarchy(Graph* gr) : fullGraph{gr} {}
+
+
+template<class Decomposer>
+void ExpanderHierarchy::build(Decomposer&& decompose) {
+    Graph* current = fullGraph;
+    Config conf{};
+    Timer t;
+
+    do {
+        t.start();
+        Partition ed = decompose(*current, conf);
+
+        if(ed.getNumCutEdges() > 0.95 * current->numEdges) {
+            conf.targetSparsity *= 0.8;
+            WARN("\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t Adjusting targetSparsity to " << conf.targetSparsity);
+            continue;
+        }
+
+        NodeIx numClusters = ed.numClusters();
+        EdgeIx cutSize = ed.getNumCutEdges();
+
+        Level lvl = contract(ed);
+        levels.push_back(lvl); // warning: may invalidate Partition (contains self-pointers)!
+        current = &levels.back().graph;
+
+        auto timeSpent = t.timeSeconds();
+        WARN("Level " << levels.size() << " (" << timeSpent << "s)\t\t-> " << numClusters << " clusters with " << cutSize << " crossing edges");
+    } while(current->numNodes > 1);
+
+
+    // a bit ugly
+    for(Level& lvl : levels) {
+        lvl.partition.updateSelfReferences();
+    }
+
+    complete = true;
+
+    WARN("Completed Hierarchy");
+}
+
 
 void ExpanderHierarchy::build() {
     build(expanderDecomposition<>);
