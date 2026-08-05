@@ -13,6 +13,7 @@
 class ExpanderHierarchy {
 
     Graph* fullGraph;
+    bool complete = false;
 
     struct Level {
         Graph graph;
@@ -38,38 +39,44 @@ public:
     void build();
 
     template<class Decomposer>
-    void build(Decomposer&& decompose) {
-        Graph* current = fullGraph;
-        Config conf{};
-        Timer t;
+    void build(Decomposer&& decompose);
 
-        do {
-            t.start();
-            Partition ed = decompose(*current, conf);
+    template<typename T>
+    frac_t predict(const T& demands) const {
+        assert(demands.size() == fullGraph->numNodes);
+        assert(complete);
 
-            if(ed.getNumCutEdges() > 0.95 * current->numEdges) {
-                conf.targetSparsity *= 0.8;
-                WARN("\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t Adjusting targetSparsity to " << conf.targetSparsity);
-                continue;
+        std::vector<frac_t> current(std::begin(demands), std::end(demands));
+        std::vector<frac_t> next(fullGraph->numNodes, 0.0);
+
+        frac_t max_congestion = 0.0;
+
+        for (const Level& lvl : levels) {
+            const NodeIx numClusters = lvl.graph.numNodes;
+            std::fill_n(next.begin(), numClusters, static_cast<frac_t>(0.0));
+
+            NodeIx clusterId = 0;
+            for (const Cluster& cluster : lvl.partition) {
+                frac_t cluster_demand = 0.0;
+                for (const ClusterVertex& cv : cluster) {
+                    cluster_demand += current[cv.nix];
+                }
+
+                if (lvl.cutSizes[clusterId] > 0) {
+                    frac_t congestion = std::abs(cluster_demand) / lvl.cutSizes[clusterId];
+                    if (congestion > max_congestion) {
+                        max_congestion = congestion;
+                    }
+                }
+
+                next[clusterId] = cluster_demand;
+                clusterId++;
             }
 
-            NodeIx numClusters = ed.numClusters();
-            EdgeIx cutSize = ed.getNumCutEdges();
-
-            Level lvl = contract(ed);
-            levels.push_back(lvl); // warning: may invalidate Partition (contains self-pointers)!
-            current = &levels.back().graph;
-
-            auto timeSpent = t.timeSeconds();
-            WARN("Level " << levels.size() << " (" << timeSpent << "s)\t\t-> " << numClusters << " clusters with " << cutSize << " crossing edges");
-        } while(current->numNodes > 1);
-
-
-        // a bit ugly
-        for(Level& lvl : levels) {
-            lvl.partition.updateSelfReferences();
+            std::swap(current, next);
         }
-        WARN("Completed Hierarchy");
+
+        return max_congestion;
     }
 
     Graph* getGraph();

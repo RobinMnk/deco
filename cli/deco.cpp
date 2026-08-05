@@ -7,6 +7,8 @@
 #include "algorithms/expander_decomposition/cuda.h"
 #endif
 
+#include "algorithms/expander_decomposition/random_walk.h"
+#include "algorithms/tree_cut_sparsifier_evaluation/evaluator.h"
 
 void checkBuildMode() {
     #ifdef NDEBUG
@@ -16,8 +18,27 @@ void checkBuildMode() {
     #endif
 }
 
-
 int main(int argc, char* argv[]) {
+    checkBuildMode();
+
+    std::string filename = argv[1];
+
+    DynamicGraph G_dyn = readDynGraph(filename);
+    Graph G = G_dyn.finalize();
+
+    ExpanderHierarchy eh{&G};
+    eh.build();
+
+
+    Evaluator ev;
+
+    double guess = ev.estimate(eh, G.numNodes);
+
+    std::cout << "Guess: " << guess << std::endl;
+}
+
+
+int main2(int argc, char* argv[]) {
     if (argc < 2) {
         std::cout << "missing arguments. expected <filename> <?seed> <sc_threshold> <rw_threshold>. Exiting." << std::endl;
     }
@@ -62,6 +83,7 @@ int main(int argc, char* argv[]) {
     // printf("Cuda Cut Edges: %d\n", cudaCutEdges);
 
     // printf(" -> Partition has %d clusters and cuts %d edges\t[computed in %fs]", part.numClusters(), part.getNumCutEdges(), t2.timeSeconds());
+    return 0;
 }
 
 
