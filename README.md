@@ -1,44 +1,44 @@
-# Parex
+# Deco
 
-Parex is a C++/CUDA implementation of fast, random-walk based expander decompositions and congestion approximators.
+Deco is a C++/CUDA project for expander decompositions, tree cut sparsifiers, and downstream graph partitioning applications.
 
 Expander decompositions are a central tool in modern graph algorithms. They partition a graph into well-connected pieces while keeping the number of edges between pieces small. This structure is useful for routing, cut and flow problems, sparsification, dynamic connectivity, congestion approximation, and graph partitioning objectives such as normalized cut.
 
 Despite their theoretical power, expander decompositions have traditionally been difficult to use in practice. Many near-optimal algorithms rely heavily on repeated max-flow computations. Those flow computations come with large hidden constants and often dominate the total running time on real-world graphs.
 
-Parex explores a different direction: replacing the main flow-based cut-finding step with random walks. Random walks are simple, local, and highly parallelizable. The resulting decomposition may cut more inter-cluster edges than stronger flow-based approaches, but it is much better suited to scalable parallel execution. In the experiments from the paper, the CUDA implementation decomposes graphs with millions to tens of millions of edges in seconds, while serving as a useful backbone for downstream tasks.
+Parex, the parallel expander decomposition algorithm in this repository, explores a different direction: replacing the main flow-based cut-finding step with random walks. Random walks are simple, local, and highly parallelizable. The resulting decomposition may cut more inter-cluster edges than stronger flow-based approaches, but it is much better suited to scalable parallel execution. In the experiments from the paper, the CUDA implementation decomposes graphs with millions to tens of millions of edges in seconds, while serving as a useful backbone for downstream tasks.
 
 The implementation is based on:
 
 > Robin M&uuml;nk, "A Practical Parallel Algorithm for Expander Decompositions," in *Proceedings of the 38th ACM Symposium on Parallelism in Algorithms and Architectures* (SPAA '26), 2026, doi: [10.1145/3816782.3819180](https://doi.org/10.1145/3816782.3819180)
 
-## Why Parex?
+## Why Deco?
 
-Parex is motivated by a practical bottleneck: expander decompositions are theoretically powerful, but many implementations remain too expensive for routine use on large real-world graphs.
+Deco is motivated by a practical bottleneck: expander decompositions are theoretically powerful, but many implementations remain too expensive for routine use on large real-world graphs.
 
 The project focuses on three ideas:
 
 - **Avoid expensive flow computations in the main cut-finding loop.** Parex uses random walks to expose sparse cuts instead of repeatedly solving max-flow instances.
 - **Exploit parallelism.** The random-walk based procedure maps naturally to CUDA, making it possible to process graphs with millions of edges in seconds.
-- **Evaluate usefulness through downstream tasks.** Rather than treating decomposition quality only as an abstract guarantee, Parex uses the decomposition hierarchy for congestion approximation and normalized cut computation.
+- **Evaluate usefulness through downstream tasks.** Rather than treating decomposition quality only as an abstract guarantee, Deco uses expander hierarchies for tree cut sparsification and applications such as normalized cut computation.
 
-This makes Parex especially interesting as a practical experiment in weak expander decompositions: it investigates how far weaker, more scalable decompositions can replace stronger but more expensive ones in downstream graph algorithms.
+This makes Deco especially interesting as a practical experiment in weak expander decompositions: it investigates how far weaker, more scalable decompositions can replace stronger but more expensive ones in downstream graph algorithms.
 
 ## Algorithmic Structure
 
-Parex can be seen as a pipeline:
+Deco can be seen as a pipeline:
 
 ```text
-expander decomposition -> congestion approximator -> normalized cut
+expander decomposition -> tree cut sparsifier -> normalized cut
 ```
 
 Each intermediate result is useful on its own:
 
 - **Expander decomposition:** partitions the graph into clusters that are internally well-connected while exposing sparse cuts between clusters.
-- **Congestion approximator:** builds a hierarchical structure that approximates the congestion of routing demands through the graph.
-- **Normalized cut:** uses the congestion approximator to compute normalized cut values and derive graph partitions.
+- **Tree cut sparsifier:** builds an expander hierarchy that represents cut structure in a tree-like form.
+- **Normalized cut:** one downstream application that uses the tree cut sparsifier to derive graph partitions.
 
-At the base of the pipeline, Parex provides two implementations of expander decomposition:
+At the base of the pipeline, Deco provides two implementations of expander decomposition:
 
 | Implementation | Description |
 | --- | --- |
@@ -49,12 +49,24 @@ Both implementations follow the same high-level principle: diffuse values inside
 
 ## Project Status
 
-Parex is research code accompanying the paper above. It contains:
+Deco is research code accompanying the paper above. It contains:
 
 - a single-threaded CPU expander decomposition implementation
 - a CUDA-accelerated expander decomposition implementation
-- hierarchy construction for congestion approximation
-- normalized cut computation built on the hierarchy
+- expander hierarchy construction for tree cut sparsification
+- normalized cut computation as a downstream application
+
+The source layout mirrors those roles:
+
+```text
+lib/core/                         graph and partition data structures
+lib/algorithms/expander_decomposition/
+                                  CPU and optional CUDA decomposition implementations
+lib/algorithms/tree_cut_sparsifier/
+                                  expander hierarchy construction
+lib/algorithms/applications/      downstream uses, currently normalized cut
+cli/                              command-line executable
+```
 
 The current command-line executable runs the CUDA expander decomposition path and reports partition statistics. Some higher-level components are available as library code rather than as polished command-line tools.
 
@@ -62,8 +74,7 @@ The current command-line executable runs the CUDA expander decomposition path an
 
 - CMake 3.18 or newer
 - A C++20 compiler
-- NVIDIA CUDA Toolkit with C++20-capable CUDA compiler support
-- An NVIDIA GPU compatible with the configured CUDA architectures
+- Optional: NVIDIA CUDA Toolkit and an NVIDIA GPU compatible with the configured CUDA architectures
 - Git, if CMake needs to fetch test dependencies
 
 GoogleTest is fetched automatically through CMake for the test targets.
@@ -76,7 +87,7 @@ The CUDA library currently targets these GPU architectures:
 CUDA_ARCHITECTURES "80;86"
 ```
 
-This is configured in `cuda/CMakeLists.txt`. If your GPU uses a different compute capability, update that setting before building.
+This is configured in `lib/algorithms/expander_decomposition/cuda/CMakeLists.txt`. If your GPU uses a different compute capability, update that setting before building.
 
 ## Building
 
@@ -87,12 +98,19 @@ cmake -S . -B cmake-build-release -DCMAKE_BUILD_TYPE=Release
 cmake --build cmake-build-release --config Release
 ```
 
+CUDA can be disabled for CPU-only builds:
+
+```powershell
+cmake -S . -B cmake-build-release -DCMAKE_BUILD_TYPE=Release -DDECO_ENABLE_CUDA=OFF
+cmake --build cmake-build-release --config Release
+```
+
 ## Running
 
-The current executable runs the CUDA expander decomposition path.
+The current executable runs the CUDA expander decomposition path when CUDA is enabled, and falls back to the CPU implementation in CPU-only builds.
 
 ```text
-Parex <filename> [seed] [sweep_cut_threshold] [random_walk_threshold]
+Deco <filename> [seed] [sweep_cut_threshold] [random_walk_threshold]
 ```
 
 Arguments:
@@ -107,7 +125,7 @@ Arguments:
 Example:
 
 ```powershell
-.\cmake-build-release\Parex graphs\example.mtx 6582 0.3 1e-4
+.\cmake-build-release\Deco graphs\example.mtx 6582 0.3 1e-4
 ```
 
 The program prints:
@@ -140,7 +158,7 @@ The CUDA implementation also uses constants from `lib/core/definitions.h`, inclu
 
 ## Citation
 
-If you use Parex in academic work, please cite the paper this implementation is based on:
+If you use Deco or Parex in academic work, please cite the paper this implementation is based on:
 
 ```bibtex
 @inproceedings{muenk2026parex,

@@ -12,7 +12,7 @@
 #include <thrust/fill.h>
 #include <thrust/scatter.h>
 
-#include "graph.h"
+#include "core/graph.h"
 #include "types.h"
 
 //struct DevGraph {

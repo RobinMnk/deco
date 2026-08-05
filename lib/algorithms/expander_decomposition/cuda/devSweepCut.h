@@ -332,8 +332,9 @@ struct CheckThreshold {
 
 
 struct ExtractLabeledNodeOp {
+    template<typename Pair>
     __host__ __device__
-    LabeledNode operator()(const auto& pair) const {
+    LabeledNode operator()(const Pair& pair) const {
         return LabeledNode{
             thrust::get<0>(pair).nix,
             thrust::get<1>(pair),

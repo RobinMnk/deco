@@ -5,7 +5,7 @@
 #ifndef RCUT_NORMALIZED_CUT_H
 #define RCUT_NORMALIZED_CUT_H
 
-#include "expander_hierarchy.h"
+#include "algorithms/tree_cut_sparsifier/expander_hierarchy.h"
 #include <set>
 
 

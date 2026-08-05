@@ -11,7 +11,7 @@
 #include <thrust/sort.h>
 #include <thrust/unique.h>
 #include <thrust/host_vector.h>
-#include "timer.h"
+#include "utils/timer.h"
 
 struct InitFunctor {
     const NodeIx* ranges;

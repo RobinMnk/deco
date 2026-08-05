@@ -15,8 +15,7 @@ function(configure_test_target target_name source_file)
 
     target_link_libraries(${target_name}
             PRIVATE
-            ParexLib
-            ParexCuda
+            DecoLib
             GTest::gtest_main
     )
 
@@ -28,5 +27,10 @@ function(configure_test_target target_name source_file)
     gtest_discover_tests(${target_name})
 endfunction()
 
-configure_test_target(CudaTest cudaTest.cpp)
 configure_test_target(clusterTest clusterTest.cpp)
+
+if(DECO_ENABLE_CUDA)
+    configure_test_target(CudaTest cudaTest.cpp)
+    target_link_libraries(CudaTest PRIVATE DecoExpanderDecompositionCuda)
+    target_compile_definitions(CudaTest PRIVATE DECO_ENABLE_CUDA)
+endif()

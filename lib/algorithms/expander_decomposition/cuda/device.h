@@ -10,7 +10,7 @@
 #include "devRandomWalk.h"
 #include "devSweepCut.h"
 #include "devPartition.h"
-#include "timer.h"
+#include "utils/timer.h"
 
 struct CudaDeviceManager::Impl {
     std::unique_ptr<GraphManager> gm;

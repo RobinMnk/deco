@@ -121,7 +121,7 @@ public:
 
     void removeEdge(NodeIx fx, NodeIx tx) {
         if(fx > tx) std::swap(fx, tx);
-        auto eit = std::ranges::find(edges, Edge{fx, tx});
+        auto eit = std::find(edges.begin(), edges.end(), Edge{fx, tx});
         std::swap(*eit, edges.back());
         popEdge();
     }

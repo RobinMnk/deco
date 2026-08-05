@@ -5,7 +5,7 @@
 #ifndef RCUT_RANDOM_WALK_H
 #define RCUT_RANDOM_WALK_H
 
-#include "partition.h"
+#include "core/partition.h"
 #include <valarray>
 #include <random>
 

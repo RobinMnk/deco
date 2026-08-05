@@ -5,10 +5,10 @@
 #include <gtest/gtest.h>
 #include "core/graph.h"
 #include "core/partition.h"
-#include "algorithms/random_walk.h"
-#include "../cuda/interface.h"
+#include "algorithms/expander_decomposition/random_walk.h"
+#include "algorithms/expander_decomposition/cuda/interface.h"
 #include "utils/graph_io.h"
-#include "timer.h"
+#include "utils/timer.h"
 
 constexpr auto filename = "../../graphs/mock.mtx";
 

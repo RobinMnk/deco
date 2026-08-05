@@ -2,31 +2,13 @@
 // Created by robin on 13.03.2025.
 //
 
-#ifndef RCUT_EXPANDER_DECOMPOSITION_H
-#define RCUT_EXPANDER_DECOMPOSITION_H
+#ifndef RCUT_EXPANDER_DECOMPOSITION_CPU_H
+#define RCUT_EXPANDER_DECOMPOSITION_CPU_H
 
-#include "partition.h"
+#include "config.h"
+#include "core/partition.h"
 #include "random_walk.h"
-#include "cuda/interface.h"
 #include <numeric>
-
-struct Strategy {
-    enum ClusterResetStrategy   { RECENTER, RESET };
-    enum CutStrategy            { CASCADE, ITERATE };
-
-    ClusterResetStrategy    crs{RECENTER};
-    CutStrategy             cs{ITERATE};
-    bool                    cutWhenConverged{false};
-};
-
-
-// Configuration for Expander Decomposition
-struct Config {
-    frac_t targetSparsity = 0.2;
-    frac_t randomWalkThreshold = 1e-5;
-    size_t initialNumSteps = 1; // initial number of rw steps, before the first sweep cut is made
-    size_t mainNumSteps = 1;
-};
 
 
 //template<Strategy strategy = {}>
@@ -167,4 +149,4 @@ Partition expanderDecomposition(Graph& graph, const Config& config = {}) {
     return decomposition;
 }
 
-#endif //RCUT_EXPANDER_DECOMPOSITION_H
+#endif //RCUT_EXPANDER_DECOMPOSITION_CPU_H

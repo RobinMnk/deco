@@ -5,9 +5,9 @@
 #ifndef RCUT_EXPANDER_HIERARCHY_H
 #define RCUT_EXPANDER_HIERARCHY_H
 
-#include "expander_decomposition.h"
+#include "algorithms/expander_decomposition/cpu.h"
 
-#include "../utils/timer.h"
+#include "utils/timer.h"
 #include <iostream>
 
 class ExpanderHierarchy {
@@ -87,32 +87,23 @@ class ExpanderHierarchy {
         };
     }
 
-
-    template<bool useExternal=false>
-    Partition computeExpanderDecomposition(Graph* graph, Config conf={}) {
-        if constexpr (useExternal) {
-
-
-
-
-        } else {
-            return expanderDecomposition(*graph, conf);
-        }
-    }
-
 public:
 
     explicit ExpanderHierarchy(Graph* gr) : fullGraph{gr} {}
 
-    template<bool useExternal=false>
     void build() {
+        build(expanderDecomposition<>);
+    }
+
+    template<class Decomposer>
+    void build(Decomposer&& decompose) {
         Graph* current = fullGraph;
         Config conf{};
         Timer t;
 
         do {
             t.start();
-            Partition ed = computeExpanderDecomposition<useExternal>(current, conf);
+            Partition ed = decompose(*current, conf);
 
             if(ed.getNumCutEdges() > 0.95 * current->numEdges) {
                 conf.targetSparsity *= 0.8;
