@@ -26,10 +26,11 @@ Graph DynamicGraph::finalize() const {
     eix = 0;
     NodeIx nix = 0;
     std::vector<NodeIx> eg(2 * numEdges);
-    while(eix < fullEdges.size()) {
-        assert(nix <= numNodes);
+    while(nix < numNodes) {
         rg.at(nix) = eix;
-        while(eix < fullEdges.size() && fullEdges.at(eix).fx == nix) eix++;
+        while(eix < fullEdges.size() && fullEdges.at(eix).fx == nix) {
+            eix++;
+        }
         nix++;
     }
     rg.at(numNodes) = eix;

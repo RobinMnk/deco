@@ -6,7 +6,6 @@
 #define RCUT_DEFINITIONS_H
 
 #include <cassert>
-#include <vector>
 
 #ifdef DEBUG
 #include <iostream>
@@ -23,25 +22,7 @@
 using NodeIx        = unsigned int;
 using EdgeIx        = unsigned int;
 using EdgeWeight    = unsigned int;
-using frac_t        = float;
-
-constexpr int threads = 256;
-constexpr int WARP = 32;
-constexpr int warpsPerBlock = threads / WARP;
-static_assert(WARP > 0 && WARP <= 32 && (WARP & (WARP - 1)) == 0, "WARP must be a power of two in [1, 32]");
-static_assert(threads % WARP == 0, "threads must be divisible by WARP");
-
-constexpr int WARPMASK = WARP-1;
-constexpr unsigned int BASE_SUBWARP_MASK = (WARP == 32) ? 0xFFFFFFFFU : ((1U << WARP) - 1U);
-
-
-inline unsigned int getGridSize(unsigned int n) {
-    return (n + threads - 1) / threads;
-}
-
-inline unsigned int getGridSizeWarpParallel(unsigned int n) {
-    return (n + warpsPerBlock - 1) / warpsPerBlock;
-}
+using frac_t        = double;
 
 inline unsigned int randSeed{6582};
 
@@ -50,61 +31,5 @@ inline frac_t rw_threshold = 1e-4;
 inline float sc_threshold = 0.3;
 
 constexpr NodeIx INVALID_EDGE = static_cast<NodeIx>(-1);
-
-
-using label_t = int32_t;
-
-struct SweepCutData {
-    label_t clusterId;
-    float sparsity;
-    NodeIx offset;
-};
-
-struct LabeledNode {
-    NodeIx nix;
-    label_t clusterId;
-};
-
-struct NodeData {
-    NodeIx nix;
-    // EdgeIx activeDegree;
-    // int64_t label;  // a negative label represents inactive cluster
-
-    // float rwValue;
-    EdgeIx prefixVolume;
-    int32_t prefixEdgeDiff;
-    NodeIx offsetInCluster;
-};
-
-struct ClusterData {
-    float rwSum;
-    float maxPotential;
-    float minPotential;
-    NodeIx totalElements;
-};
-
-
-// struct NodeData {
-//     NodeIx nix;
-//     EdgeIx activeDegree;
-//     int64_t label;  // a negative label represents inactive cluster
-//
-//     // float rwValue;
-//     EdgeIx prefixVolume;
-//     int32_t prefixEdgeDiff;
-//     NodeIx offsetInCluster;
-// };
-
-struct AllSweepCuts {
-    std::vector<label_t> clusterIds;
-    std::vector<SweepCutData> cuts;
-//    std::vector<PrefixValues> prefixSums;
-};
-
-struct FinalPartition {
-    std::vector<label_t> clusterIds;
-    int numClusters;
-};
-
 
 #endif //RCUT_DEFINITIONS_H
