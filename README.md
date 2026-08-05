@@ -61,10 +61,11 @@ The source layout mirrors those roles:
 ```text
 lib/core/                         graph and partition data structures
 lib/algorithms/expander_decomposition/
-                                  CPU and optional CUDA decomposition implementations
+                                  public CPU and optional CUDA decomposition headers
 lib/algorithms/tree_cut_sparsifier/
-                                  expander hierarchy construction
+                                  public expander hierarchy headers
 lib/algorithms/applications/      downstream uses, currently normalized cut
+src/                              compiled implementations and private CUDA internals
 cli/                              command-line executable
 ```
 
@@ -87,7 +88,7 @@ The CUDA library currently targets these GPU architectures:
 CUDA_ARCHITECTURES "80;86"
 ```
 
-This is configured in `lib/algorithms/expander_decomposition/cuda/CMakeLists.txt`. If your GPU uses a different compute capability, update that setting before building.
+This is configured in `src/algorithms/expander_decomposition/cuda/CMakeLists.txt`. If your GPU uses a different compute capability, update that setting before building.
 
 ## Building
 

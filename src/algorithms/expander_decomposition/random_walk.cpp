@@ -1,0 +1,138 @@
+#include "algorithms/expander_decomposition/random_walk.h"
+
+std::mt19937 random_source{1};
+
+RandomWalk::RandomWalk(size_t n) : m_distribution(n), m_old_distribution(n) {
+    init_distribution();
+}
+
+void RandomWalk::setData(std::vector<frac_t>& data) {
+    assert(data.size() == m_distribution.size());
+    for(NodeIx nix = 0; nix < data.size(); nix++) {
+        m_distribution[nix] = data[nix];
+    }
+}
+
+const std::valarray<frac_t>& RandomWalk::values() {
+    return m_distribution;
+}
+
+void RandomWalk::iterate(const Partition& part, const std::vector<NodeIx>& active) {
+    std::swap(m_old_distribution, m_distribution);
+    m_distribution = 0;
+    frac_t val;
+
+    for(NodeIx clusterId: active) {
+        const Cluster& cluster = part.getCluster(clusterId);
+        for(const ClusterVertex& cv: cluster) {
+            if (cv.internalDegree == 0) continue;
+            val = m_old_distribution[cv.nix] / static_cast<frac_t>(cv.internalDegree);
+            for (auto it = cluster.edgeBegin(cv); it != cluster.edgeEnd(cv); ++it) {
+                NodeIx nb = *it;
+                m_distribution[nb] += val;
+            }
+        }
+    }
+
+    m_distribution *= (1.0f - rw_stay);
+    m_distribution += rw_stay * m_old_distribution;
+}
+
+void RandomWalk::init_distribution() {
+    std::normal_distribution<frac_t> normal_distribution;
+    frac_t avg = 0.0;
+
+    for (size_t i = 0; i < m_distribution.size(); i++) {
+        auto x = normal_distribution(random_source);
+        m_distribution[i] = x;
+        avg += (x - avg) / (static_cast<frac_t >(i) + 1.0f);
+    }
+
+    m_distribution -= avg;
+}
+
+frac_t RandomWalk::resetCluster(const Cluster& cluster) {
+    std::normal_distribution<frac_t> normal_distribution;
+    frac_t avg = 0.0;
+    int i = 1;
+
+    for (const ClusterVertex& cn: cluster) {
+        auto x = normal_distribution(random_source);
+        m_distribution[cn.nix] = x;
+        avg += (x - avg) / static_cast<frac_t >(i);
+        i++;
+    }
+
+    frac_t min = std::numeric_limits<frac_t>::max();
+    frac_t max = std::numeric_limits<frac_t>::lowest();
+
+    for (const ClusterVertex& cn: cluster) {
+        m_distribution[cn.nix] -= avg;
+        if(m_distribution[cn.nix] < min) min = m_distribution[cn.nix];
+        if(m_distribution[cn.nix] > max) max = m_distribution[cn.nix];
+    }
+
+    return max - min;
+}
+
+frac_t RandomWalk::averageOf(const Cluster& cluster) {
+    frac_t avg = 0.0;
+    int i = 1;
+
+    for(const ClusterVertex& cv: cluster) {
+        auto x = m_distribution[cv.nix];
+        avg += (x - avg) / static_cast<frac_t >(i);
+        i++;
+    }
+
+    return avg;
+}
+
+void RandomWalk::recenterClusterF(const Cluster& cluster) {
+    frac_t avg = 0.0;
+    int i = 1;
+
+    for (const ClusterVertex& cn: cluster) {
+        auto x = m_distribution[cn.nix];
+        avg += (x - avg) / static_cast<frac_t >(i);
+        i++;
+    }
+
+    for (const ClusterVertex& cn: cluster) {
+        m_distribution[cn.nix] -= avg;
+    }
+}
+
+frac_t RandomWalk::potential(const Cluster& cluster) {
+    frac_t min = std::numeric_limits<frac_t>::max();
+    frac_t max = std::numeric_limits<frac_t>::lowest();
+
+    for (const ClusterVertex& cn: cluster) {
+        min = std::min(min, m_distribution[cn.nix]);
+        max = std::max(max, m_distribution[cn.nix]);
+    }
+
+    return max - min;
+}
+
+frac_t RandomWalk::recenterCluster(const Cluster& cluster) {
+    frac_t avg = 0.0;
+    int i = 1;
+
+    for (const ClusterVertex& cn: cluster) {
+        auto x = m_distribution[cn.nix];
+        avg += (x - avg) / static_cast<frac_t >(i);
+        i++;
+    }
+
+    frac_t min = std::numeric_limits<frac_t>::max();
+    frac_t max = std::numeric_limits<frac_t>::lowest();
+
+    for (const ClusterVertex& cn: cluster) {
+        m_distribution[cn.nix] -= avg;
+        if(m_distribution[cn.nix] < min) min = m_distribution[cn.nix];
+        if(m_distribution[cn.nix] > max) max = m_distribution[cn.nix];
+    }
+
+    return max - min;
+}

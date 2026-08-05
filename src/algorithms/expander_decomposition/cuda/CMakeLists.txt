@@ -4,7 +4,11 @@ add_library(DecoExpanderDecompositionCuda STATIC)
 target_sources(DecoExpanderDecompositionCuda PRIVATE ${ALL_CUDA_FILES})
 set_target_properties(DecoExpanderDecompositionCuda PROPERTIES CUDA_ARCHITECTURES "80;86")
 target_link_libraries(DecoExpanderDecompositionCuda PUBLIC DecoLib)
-target_include_directories(DecoExpanderDecompositionCuda PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/..)
+target_include_directories(DecoExpanderDecompositionCuda
+        PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}
+        ${PROJECT_SOURCE_DIR}/lib/algorithms/expander_decomposition/cuda
+)
 
 target_compile_options(DecoExpanderDecompositionCuda PRIVATE
         $<$<COMPILE_LANGUAGE:CUDA>:

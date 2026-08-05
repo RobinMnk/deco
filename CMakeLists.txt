@@ -12,7 +12,7 @@ add_subdirectory(lib)
 if(DECO_ENABLE_CUDA)
     enable_language(CUDA)
     set(CMAKE_CUDA_STANDARD 17)
-    add_subdirectory(lib/algorithms/expander_decomposition/cuda)
+    add_subdirectory(src/algorithms/expander_decomposition/cuda)
 endif()
 
 if(DECO_BUILD_TESTS)

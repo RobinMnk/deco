@@ -26,74 +26,16 @@ class ExpanderHierarchy {
 
     std::vector<Level> levels;
 
-    Level contract(Partition& part) const {
-        if(levels.empty()) return contract<true>(part);
-        else return contract<false>(part);
-    }
+    Level contract(Partition& part) const;
 
     template<bool first>
-    Level contract(Partition& part) const {
-        const Graph& graph = part.getGraph();
-        if constexpr (!first) {
-            assert(graph.numNodes == levels.back().graph.numNodes);
-        }
-        std::vector<NodeIx> edges(2 * part.getNumCutEdges());
-        std::vector<EdgeIx> range(part.numClusters() + 1);
-        std::vector<EdgeIx> volumes(part.numClusters(), 0);
-        std::vector<EdgeWeight> cutSizes(part.numClusters(), 0);
-        range[0] = 0;
-
-        NodeIx nix = 0;
-        // to which clusterId does a nix belong
-        std::vector<NodeIx> clusterLookup(graph.numNodes, graph.numNodes + 1);
-        for(const Cluster& cluster: part) {
-            if constexpr (first) {
-                volumes[nix] = cluster.volume;
-            }
-            for (const ClusterVertex& cv: cluster) {
-                clusterLookup[cv.nix] = nix;
-                if constexpr (!first) {
-                    volumes[nix] += levels.back().volumes[cv.nix];
-                }
-            }
-            nix++;
-        }
-
-        EdgeIx eix = 0;
-        nix = 0;
-        for(const Cluster& cluster: part) {
-            for (const ClusterVertex& cv: cluster) {
-                // iterate all deleted edges
-                for (auto it = cluster.edgeEnd(cv); it != graph.nend(cv.nix); ++it) {
-                    NodeIx nb = *it; // neighbor in other cluster
-                    assert(clusterLookup[nb] != nix);
-                    assert(clusterLookup[nb] != graph.numNodes + 1);
-                    edges[eix] = clusterLookup[nb];
-                    cutSizes[nix]++;
-                    eix++;
-                }
-            }
-            assert(cutSizes[nix] == cluster.volume - cluster.internalVolume);
-            nix++;
-            range[nix] = eix;
-        }
-
-        return {
-            Graph(std::move(edges), std::move(range), part.numClusters(), part.getNumCutEdges()),
-            std::move(part),
-            std::move(volumes),
-            std::move(cutSizes),
-            std::move(clusterLookup)
-        };
-    }
+    Level contract(Partition& part) const;
 
 public:
 
-    explicit ExpanderHierarchy(Graph* gr) : fullGraph{gr} {}
+    explicit ExpanderHierarchy(Graph* gr);
 
-    void build() {
-        build(expanderDecomposition<>);
-    }
+    void build();
 
     template<class Decomposer>
     void build(Decomposer&& decompose) {
@@ -130,24 +72,14 @@ public:
         WARN("Completed Hierarchy");
     }
 
-    Graph* getGraph() {
-        return fullGraph;
-    }
+    Graph* getGraph();
 
-    NodeIx height() {
-        return static_cast<NodeIx>(levels.size());
-    }
+    NodeIx height();
 
-    const Level& lvl(NodeIx l) {
-        return levels[l];
-    }
+    const Level& lvl(NodeIx l);
 
-    void subtractVolume(NodeIx l, NodeIx nix, EdgeIx vol) {
-        levels[l].volumes[nix] -= vol;
-    }
-    void addCut(NodeIx l, NodeIx nix, EdgeIx cut) {
-        levels[l].cutSizes[nix] += cut;
-    }
+    void subtractVolume(NodeIx l, NodeIx nix, EdgeIx vol);
+    void addCut(NodeIx l, NodeIx nix, EdgeIx cut);
 };
 
 

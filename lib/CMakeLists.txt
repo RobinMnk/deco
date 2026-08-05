@@ -1,8 +1,15 @@
-add_library(DecoLib INTERFACE)
-target_include_directories(DecoLib INTERFACE
+add_library(DecoLib STATIC
+        ${PROJECT_SOURCE_DIR}/src/core/graph.cpp
+        ${PROJECT_SOURCE_DIR}/src/core/partition.cpp
+        ${PROJECT_SOURCE_DIR}/src/algorithms/expander_decomposition/random_walk.cpp
+        ${PROJECT_SOURCE_DIR}/src/algorithms/tree_cut_sparsifier/expander_hierarchy.cpp
+        ${PROJECT_SOURCE_DIR}/src/algorithms/applications/normalized_cut.cpp
+)
+
+target_include_directories(DecoLib PUBLIC
         ${PROJECT_SOURCE_DIR}
 )
-target_include_directories(DecoLib INTERFACE ${CMAKE_CURRENT_SOURCE_DIR})
+target_include_directories(DecoLib PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 
 #target_compile_options(DecoLib INTERFACE
 #        $<$<COMPILE_LANGUAGE:CXX>:
@@ -18,7 +25,7 @@ target_include_directories(DecoLib INTERFACE ${CMAKE_CURRENT_SOURCE_DIR})
 #        >
 #)
 
-target_compile_options(DecoLib INTERFACE
+target_compile_options(DecoLib PUBLIC
         $<$<COMPILE_LANGUAGE:CUDA>:
         $<$<CONFIG:Release>:
         -O3
@@ -31,5 +38,4 @@ target_compile_options(DecoLib INTERFACE
 )
 
 # Enable Device Link Time Optimization if using CUDA 11.0+
-set_target_properties(DecoLib PROPERTIES CUDA_SEPARABLE_COMPILATION ON)
 set_target_properties(DecoLib PROPERTIES INTER_PROCEEDURAL_OPTIMIZATION_RELEASE TRUE)
