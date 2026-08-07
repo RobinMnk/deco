@@ -1,6 +1,6 @@
 #include "algorithms/expander_decomposition/random_walk.h"
 
-std::mt19937 random_source{1};
+std::mt19937 random_source{std::random_device{}()};
 
 RandomWalk::RandomWalk(size_t n) : m_distribution(n), m_old_distribution(n) {
     init_distribution();
@@ -20,13 +20,12 @@ const std::valarray<frac_t>& RandomWalk::values() {
 void RandomWalk::iterate(const Partition& part, const std::vector<NodeIx>& active) {
     std::swap(m_old_distribution, m_distribution);
     m_distribution = 0;
-    frac_t val;
 
     for(NodeIx clusterId: active) {
         const Cluster& cluster = part.getCluster(clusterId);
         for(const ClusterVertex& cv: cluster) {
             if (cv.internalDegree == 0) continue;
-            val = m_old_distribution[cv.nix] / static_cast<frac_t>(cv.internalDegree);
+            frac_t val = m_old_distribution[cv.nix] / static_cast<frac_t>(cv.internalDegree);
             for (auto it = cluster.edgeBegin(cv); it != cluster.edgeEnd(cv); ++it) {
                 NodeIx nb = *it;
                 m_distribution[nb] += val;

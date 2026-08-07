@@ -110,6 +110,10 @@ Graph* ExpanderHierarchy::getGraph() {
     return fullGraph;
 }
 
+const Graph* ExpanderHierarchy::getGraph() const {
+    return fullGraph;
+}
+
 NodeIx ExpanderHierarchy::height() {
     return static_cast<NodeIx>(levels.size());
 }

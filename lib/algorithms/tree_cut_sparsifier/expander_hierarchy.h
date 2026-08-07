@@ -8,7 +8,11 @@
 #include "algorithms/expander_decomposition/cpu.h"
 
 #include "utils/timer.h"
+#include <cmath>
 #include <iostream>
+#include <limits>
+#include <numeric>
+#include <stdexcept>
 
 class ExpanderHierarchy {
 
@@ -42,44 +46,50 @@ public:
     void build(Decomposer&& decompose);
 
     template<typename T>
-    frac_t predict(const T& demands) const {
+    double predict(const T& demands) const {
         assert(demands.size() == fullGraph->numNodes);
         assert(complete);
 
-        std::vector<frac_t> current(std::begin(demands), std::end(demands));
-        std::vector<frac_t> next(fullGraph->numNodes, 0.0);
+        std::vector<double> current(std::begin(demands), std::end(demands));
+        std::vector<double> next(fullGraph->numNodes, 0.0);
 
-        frac_t max_congestion = 0.0;
+        const double totalDemand = std::accumulate(current.begin(), current.end(), 0.0);
+        if (std::abs(totalDemand) > 1e-8) {
+            throw std::invalid_argument("Tree cut sparsifier prediction requires demand to sum to zero.");
+        }
+
+        double maxCongestion = 0.0;
 
         for (const Level& lvl : levels) {
             const NodeIx numClusters = lvl.graph.numNodes;
-            std::fill_n(next.begin(), numClusters, static_cast<frac_t>(0.0));
+            std::fill_n(next.begin(), numClusters, 0.0);
 
             NodeIx clusterId = 0;
             for (const Cluster& cluster : lvl.partition) {
-                frac_t cluster_demand = 0.0;
+                double clusterDemand = 0.0;
                 for (const ClusterVertex& cv : cluster) {
-                    cluster_demand += current[cv.nix];
+                    clusterDemand += current[cv.nix];
                 }
 
                 if (lvl.cutSizes[clusterId] > 0) {
-                    frac_t congestion = std::abs(cluster_demand) / lvl.cutSizes[clusterId];
-                    if (congestion > max_congestion) {
-                        max_congestion = congestion;
-                    }
+                    const double congestion = std::abs(clusterDemand) / static_cast<double>(lvl.cutSizes[clusterId]);
+                    maxCongestion = std::max(maxCongestion, congestion);
+                } else if (std::abs(clusterDemand) > 1e-8) {
+                    return std::numeric_limits<double>::infinity();
                 }
 
-                next[clusterId] = cluster_demand;
+                next[clusterId] = clusterDemand;
                 clusterId++;
             }
 
             std::swap(current, next);
         }
 
-        return max_congestion;
+        return maxCongestion;
     }
 
     Graph* getGraph();
+    const Graph* getGraph() const;
 
     NodeIx height();
 
