@@ -7,7 +7,6 @@ option(DECO_ENABLE_CUDA "Build CUDA expander decomposition" OFF)
 option(DECO_BUILD_CLI "Build command-line executable" ON)
 option(DECO_BUILD_TESTS "Build tests" OFF)
 
-add_subdirectory(external)
 add_subdirectory(lib)
 
 if(DECO_ENABLE_CUDA)

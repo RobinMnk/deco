@@ -18,6 +18,35 @@ void checkBuildMode() {
     #endif
 }
 
+void suite(Graph& G) {
+    int numRounds = 10;
+
+    double maxVal = 0;
+    double minVal = 999.0;
+
+    Timer t;
+
+    for (int i = 0; i < numRounds; ++i) {
+        ExpanderHierarchy eh{&G};
+
+        t.start();
+        eh.build();
+        auto millis = t.timeMillis();
+
+        NormalizedCut nc{&eh};
+
+        Partition kPart = nc.compute(16);
+
+        double ncVal = compute_normalized_cut(kPart);
+        if (ncVal > maxVal) maxVal = ncVal;
+        if (ncVal < minVal) minVal = ncVal;
+
+        std::cout << "Guess: " << ncVal  << "\t [" << millis/1000.0 << "s]" << std::endl;
+    }
+
+    std::cout << "\n=============================\n -> " << maxVal << "\n -> " << minVal << std::endl;
+}
+
 int main(int argc, char* argv[]) {
     checkBuildMode();
 
@@ -26,15 +55,25 @@ int main(int argc, char* argv[]) {
     DynamicGraph G_dyn = readDynGraph(filename);
     Graph G = G_dyn.finalize();
 
-    ExpanderHierarchy eh{&G};
-    eh.build();
+    suite(G);
+
+    // ExpanderHierarchy eh{&G};
+    // eh.build();
+    //
+    // NormalizedCut nc{&eh};
+    //
+    // Partition kPart = nc.compute(16);
+    //
+    // double ncVal = compute_normalized_cut(kPart);
+    //
+    // std::cout << "Guess: " << ncVal << std::endl;
 
 
-    Evaluator ev;
-
-    double guess = ev.estimate(eh, G.numNodes);
-
-    std::cout << "Guess: " << guess << std::endl;
+    // Evaluator ev;
+    //
+    // double guess = ev.estimate(eh, G.numNodes);
+    //
+    // std::cout << "Guess: " << guess << std::endl;
 }
 
 

@@ -74,7 +74,7 @@ void ExpanderHierarchy::build(Decomposer&& decompose) {
         Partition ed = decompose(*current, conf);
 
         if(ed.getNumCutEdges() > 0.95 * current->numEdges) {
-            conf.targetSparsity *= 0.8;
+            conf.targetSparsity /= 2;
             WARN("\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t Adjusting targetSparsity to " << conf.targetSparsity);
             continue;
         }
@@ -87,7 +87,7 @@ void ExpanderHierarchy::build(Decomposer&& decompose) {
         current = &levels.back().graph;
 
         auto timeSpent = t.timeSeconds();
-        WARN("Level " << levels.size() << " (" << timeSpent << "s)\t\t-> " << numClusters << " clusters with " << cutSize << " crossing edges");
+        // WARN("Level " << levels.size() << " (" << timeSpent << "s)\t\t-> " << numClusters << " clusters with " << cutSize << " crossing edges");
     } while(current->numNodes > 1);
 
 
@@ -98,7 +98,7 @@ void ExpanderHierarchy::build(Decomposer&& decompose) {
 
     complete = true;
 
-    WARN("Completed Hierarchy");
+    // WARN("Completed Hierarchy");
 }
 
 

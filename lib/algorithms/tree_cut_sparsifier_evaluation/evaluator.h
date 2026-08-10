@@ -12,16 +12,16 @@ class Evaluator {
 
 
 public:
-    double estimate(const ExpanderHierarchy& eh, NodeIx numNodes) {
-        RandomWalk rw(numNodes);
+    double estimate(const Graph& graph, const ExpanderHierarchy& eh, NodeIx numNodes) {
+        RandomWalk rw(graph);
         double max_cong = 0.0;
 
-        for (int i = 0; i < 1; i++) {
+        for (int i = 0; i < 50; i++) {
             auto& demand = rw.values();
             frac_t cong = eh.predict(demand);
             std::cout << "Congestion: " << cong << std::endl;
             if (cong > max_cong) max_cong = cong;
-            rw.init_distribution();
+            rw.init_distribution(graph);
         }
 
         return max_cong;

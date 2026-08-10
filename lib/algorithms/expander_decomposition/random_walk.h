@@ -18,11 +18,13 @@ class RandomWalk {
 //    std::vector<frac_t> val_prec;
 
 public:
-    explicit RandomWalk (size_t n);
+    explicit RandomWalk (const Graph& gr) : m_distribution(gr.numNodes), m_old_distribution(gr.numNodes) {
+        init_distribution(gr);
+    }
 
-    void setData(std::vector<frac_t>& data);
+    void setData(const std::vector<frac_t>& data);
 
-    void init_distribution();
+    void init_distribution(const Graph& gr);
 
     frac_t resetCluster(const Cluster& cluster);
 
@@ -36,7 +38,7 @@ public:
 
     frac_t recenterCluster(const Cluster& cluster);
 
-    frac_t averageOf(const Cluster& cluster);
+    frac_t averageOf(const Cluster& cluster) const;
 };
 
 #endif //RCUT_RANDOM_WALK_H

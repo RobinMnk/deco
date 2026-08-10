@@ -10,52 +10,27 @@
 #include "random_walk.h"
 #include <numeric>
 
+#include <bit>
+#include <cstdint>
 
-//template<Strategy strategy = {}>
-//Partition parallelExpanderDecomposition(Graph& graph, CudaDeviceManager& cuda, const Config& config = {}) {
-//    Partition decomposition{&graph};
-//
-//    std::vector<NodeIx> active{0}; // assume graph is connected!
-//
-//    while(!active.empty()) {
-//        active.clear();
-//
-//        cuda.computeSweepCuts();
-//        AllSweepCuts result = cuda.readSweepCuts();
-//
-//        NodeIx ix{0};
-//        for(NodeIx clusterId: result.clusterIds) {
-//            SweepCut sc{result.sparsities[ix], result.offsets[ix]};
-//
-//            if(sc.sparsity < config.targetSparsity) {
-//                LOG("       -> considered sparse -> cutting");
-//                std::vector<NodeIx> modified{clusterId};
-//                decomposition.split<false>(clusterId, sc.offset, modified);
-//
-//                for (NodeIx clx: modified) {
-//                    const Cluster &cl = decomposition.getCluster(clx);
-//                    if (cl.size() < 2 || cl.internalVolume == 0) continue;
-//                    active.push_back(clx);
-//                }
-//            }
-//
-//            ix++;
-//        }
-//
-//        // tell GPU cluster updates
-//        // needs: new labels, cluster volumes, num clusters,
-//    }
-//
-//}
+inline double fast_approx_sqrt(int64_t val) {
+    if (val <= 1) return 1.0;
+    int msb = std::bit_width(static_cast<uint64_t>(val)) - 1;
+    return static_cast<double>(1ULL << (msb / 2));
+}
 
+inline bool isConverged(const Cluster& cluster, double potential, const Config& config) {
+    return potential <= config.randomWalkThreshold * std::max(std::bit_width(cluster.internalVolume), 1);
+}
+
+inline bool isSparse(const Cluster& cluster, double sparsity, const Config& config) {
+    return sparsity < config.targetSparsity * std::max(std::bit_width(cluster.internalVolume), 1);
+}
 
 template<Strategy strategy = {}>
 Partition expanderDecomposition(Graph& graph, const Config& config = {}) {
-    RandomWalk walk{graph.numNodes};
+    RandomWalk walk{graph};
     Partition decomposition{&graph};
-
-//    CudaDeviceManager devGraph;
-//    devGraph.uploadGraph(graph);
 
     std::vector<NodeIx> active, next(decomposition.numClusters());
     std::iota(next.begin(), next.end(), 0);
@@ -89,7 +64,8 @@ Partition expanderDecomposition(Graph& graph, const Config& config = {}) {
             LOG("  working on cluster " << clusterId << "\t (" << current.size() << " nodes, potential: " << walk.potential(current) << ")");
 
             if constexpr (!strategy.cutWhenConverged) {
-                if(walk.potential(current) < config.randomWalkThreshold) {
+                //if(walk.potential(current) < config.randomWalkThreshold) {
+                if (isConverged(current, walk.potential(current), config)) {
                     LOG("       -> potential sufficiently low -> certified expander");
                     continue;
                 }
@@ -99,7 +75,7 @@ Partition expanderDecomposition(Graph& graph, const Config& config = {}) {
 
             LOG("     Sweep cut:   sparsity=" << sweepCut.sparsity << ", offset=" << sweepCut.offset);
 
-            if(sweepCut.sparsity < config.targetSparsity) {
+            if(isSparse(current, sweepCut.sparsity, config)) {
                 LOG("       -> considered sparse -> cutting");
                 std::vector<NodeIx> modified{clusterId};
                 decomposition.split<false>(clusterId, sweepCut.offset, modified);
@@ -134,7 +110,7 @@ Partition expanderDecomposition(Graph& graph, const Config& config = {}) {
                 }
             } else {
                 if constexpr (strategy.cutWhenConverged) {
-                    if(walk.potential(current) > config.randomWalkThreshold) {
+                    if(!isConverged(current, walk.potential(current), config)) {
                         next.push_back(clusterId);
                     } else {
                         LOG("       -> potential sufficiently low -> certified expander");

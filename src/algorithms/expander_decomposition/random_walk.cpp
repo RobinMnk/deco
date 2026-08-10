@@ -2,11 +2,7 @@
 
 std::mt19937 random_source{std::random_device{}()};
 
-RandomWalk::RandomWalk(size_t n) : m_distribution(n), m_old_distribution(n) {
-    init_distribution();
-}
-
-void RandomWalk::setData(std::vector<frac_t>& data) {
+void RandomWalk::setData(const std::vector<frac_t>& data) {
     assert(data.size() == m_distribution.size());
     for(NodeIx nix = 0; nix < data.size(); nix++) {
         m_distribution[nix] = data[nix];
@@ -37,13 +33,18 @@ void RandomWalk::iterate(const Partition& part, const std::vector<NodeIx>& activ
     m_distribution += rw_stay * m_old_distribution;
 }
 
-void RandomWalk::init_distribution() {
-    std::normal_distribution<frac_t> normal_distribution;
+void RandomWalk::init_distribution(const Graph& gr) {
+    std::normal_distribution<> normal_distribution;
     frac_t avg = 0.0;
 
     for (size_t i = 0; i < m_distribution.size(); i++) {
-        auto x = normal_distribution(random_source);
+        // generate a normal distributed number
+        EdgeIx deg = gr.degree(i);
+        std::normal_distribution<>::param_type stdev(0.0, std::sqrt(deg));
+        frac_t x = normal_distribution(random_source, stdev);
         m_distribution[i] = x;
+
+        // use welford mean algorithm to compute the average
         avg += (x - avg) / (static_cast<frac_t >(i) + 1.0f);
     }
 
@@ -74,7 +75,7 @@ frac_t RandomWalk::resetCluster(const Cluster& cluster) {
     return max - min;
 }
 
-frac_t RandomWalk::averageOf(const Cluster& cluster) {
+frac_t RandomWalk::averageOf(const Cluster& cluster) const {
     frac_t avg = 0.0;
     int i = 1;
 
