@@ -11,11 +11,6 @@
 
 #include "definitions.h"
 
-#define NEIGHBORS(__g, __i) auto __end_it = __g.nend(__i); for(auto _it = __g.nbegin(__i); _it != __end_it; ++_it)
-#define NEIGHBORSPTR(__g, __i) auto __end_it = __g->nend(__i); for(auto _it = __g->nbegin(__i); _it != __end_it; ++_it)
-#define ITER_EIX_P(__g, __i, __eix) for(EdgeIx __eix = __g->ranges[__i]; __eix < __g->ranges[__i+1]; __eix++)
-#define ITER_EIX(__g, __i, __eix) for(EdgeIx __eix = __g.ranges[__i]; __eix < __g.ranges[__i+1]; __eix++)
-
 #if defined(_MSC_VER) && !defined(__clang__)
     #define NO_UNIQUE_ADDRESS [[msvc::no_unique_address]]
 #else
@@ -39,6 +34,7 @@ struct Unweighted {
     constexpr void swap_to_back(EdgeIx) noexcept {}
     constexpr void push_back(weight_type = 1) noexcept {}
     constexpr void pop_back() noexcept {}
+    constexpr void reserve(EdgeIx) noexcept {}
 };
 
 template <typename T>
@@ -70,6 +66,10 @@ public:
     void swap_to_back(EdgeIx eix) {
         std::swap(weights_[eix], weights_.back());
     }
+
+    void reserve(EdgeIx m) {
+        weights_.reserve(m);
+    }
 };
 
 template <typename>
@@ -81,16 +81,13 @@ struct is_weighted_policy<Weighted<T>> : std::true_type {};
 template <typename T>
 concept UnweightedPolicy = std::is_same_v<T, Unweighted>;
 
+// If T is already a policy (Unweighted or Weighted<T>), use it directly.
+// Otherwise, assume it's a scalar (like double) and wrap it in Weighted<T>.
 template <typename T>
-concept WeightPolicy = is_weighted_policy<T>::value || UnweightedPolicy<T>;
-
-// If Spec is already a policy (Unweighted or Weighted<T>), use it directly.
-// Otherwise, assume it's a scalar (like double) and wrap it in Weighted<Spec>.
-template <typename Spec>
 using select_policy_t = std::conditional_t<
-    WeightPolicy<Spec>,
-    Spec,
-    Weighted<Spec>
+    is_weighted_policy<T>::value || UnweightedPolicy<T>,
+    T,
+    Weighted<T>
 >;
 
 template <typename Spec = Unweighted>
@@ -154,7 +151,7 @@ public:
     }
 
     [[nodiscard]] EdgeIx degree(NodeIx node) const {
-        return static_cast<EdgeIx>(std::distance(nbegin(node), nend(node)));
+        return ranges[node + 1] - ranges[node];
     }
 
     // bool operator==(const Graph& other) const {
@@ -194,9 +191,16 @@ public:
 
     DynamicGraph() = default;
 
+    DynamicGraph(NodeIx n, EdgeIx m) : numNodes(n) {
+        edges.reserve(m);
+        weights.reserve(m);
+    }
+
     DynamicGraph(NodeIx n, EdgeIx m, std::vector<Edge>&& eg) : numNodes(n), numEdges(m), edges(std::move(eg)), weights(m) {}
 
-    DynamicGraph(NodeIx n, EdgeIx m, std::vector<Edge>&& eg, std::vector<weight_type>&& wgts) : numNodes(n), numEdges(m), edges(std::move(eg)), weights(std::move(wgts)) {}
+    DynamicGraph(NodeIx n, EdgeIx m, std::vector<Edge>&& eg, std::vector<weight_type>&& wgts)
+        requires (!UnweightedPolicy<Policy>) :
+        numNodes(n), numEdges(m), edges(std::move(eg)), weights(std::move(wgts)) {}
 
     // Forbid Copying
     DynamicGraph(const DynamicGraph&) = delete;

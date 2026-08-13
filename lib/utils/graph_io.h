@@ -6,109 +6,127 @@
 #define RCUT_IO_H
 
 #include "core/graph.h"
+
 #include <fstream>
-#include <iostream>
 #include <sstream>
+#include <string>
+#include <unordered_map>
+#include <stdexcept>
+#include <cstdint>
 
-Graph readGraph(const std::string& filename) {
-    std::ifstream infile(filename);
-    if (!infile) {
-        std::cerr << "Unable to open file." << std::endl;
-        exit(1);
-    }
+enum class MtxValueType { Unweighted, Real, Integer };
+enum class MtxSymmetry  { General, Symmetric, SkewSymmetric };
 
-    NodeIx numNodes, fx, tx;
-    EdgeIx numEdges;
-    infile >> numNodes >> numEdges;
+struct MtxHeader {
+    uint32_t rows{0};
+    uint32_t cols{0};
+    uint64_t entries{0};
+    MtxValueType value_type{MtxValueType::Unweighted};
+    MtxSymmetry symmetry{MtxSymmetry::General};
+};
 
-    std::vector<NodeIx> edges(2 * numEdges);
-    std::vector<EdgeIx> ranges(numNodes + 1);
-
-    EdgeIx eix;
-    NodeIx nix = 0;
-    for(eix = 0; eix < 2 * numEdges; eix++) {
-        infile >> fx >> tx;
-        edges.at(eix) = tx;
-        if(fx > nix) ranges.at(++nix) = eix;
-    }
-    infile.close();
-    ranges.at(++nix) = eix;
-
-    std::vector<EdgeIx> map(2 * numEdges);
-    // std::vector<EdgeIx> tmp(ranges);
-    for(eix = 0; eix < 2 * numEdges; eix++) {
-        tx = edges.at(eix);
-        // EdgeIx pix = tmp.at(tx)++;
-        // map.at(eix) = pix;
-        // map.at(pix) = eix;
-    }
-
-    return {std::move(edges), std::move(ranges), numNodes, numEdges};
-}
-
-DynamicGraph readDynGraph(const std::string& filename) {
-    std::ifstream infile(filename);
-    if (!infile) {
-        std::cerr << "Unable to open file." << std::endl;
-        exit(1);
-    }
-
+inline MtxHeader parse_mtx_header(std::ifstream& file) {
     std::string line;
-    if (!std::getline(infile, line)) {
-        return {}; // Or throw an error
+    MtxHeader header;
+
+    // Read banner line: %%MatrixMarket matrix coordinate <field> <symmetry>
+    if (!std::getline(file, line)) {
+        throw std::runtime_error("Empty MTX file.");
     }
 
-    while(line.starts_with("%")) {
-        if (!std::getline(infile, line)) {
-            return {};
+    std::stringstream banner_ss(line);
+    std::string banner, object, format, field, symmetry;
+    if (!(banner_ss >> banner >> object >> format >> field >> symmetry) || banner != "%%MatrixMarket") {
+        throw std::runtime_error("Invalid Matrix Market header banner.");
+    }
+
+    if (object != "matrix" || format != "coordinate") {
+        throw std::runtime_error("Only coordinate matrix market files are supported.");
+    }
+
+    // Determine weight field
+    if (field == "pattern") {
+        header.value_type = MtxValueType::Unweighted;
+    } else if (field == "real" || field == "double") {
+        header.value_type = MtxValueType::Real;
+    } else if (field == "integer") {
+        header.value_type = MtxValueType::Integer;
+    } else {
+        throw std::runtime_error("Unsupported field type: " + field);
+    }
+
+    // Determine symmetry
+    if (symmetry == "general") {
+        header.symmetry = MtxSymmetry::General;
+    } else if (symmetry == "symmetric") {
+        header.symmetry = MtxSymmetry::Symmetric;
+    } else if (symmetry == "skew-symmetric") {
+        header.symmetry = MtxSymmetry::SkewSymmetric;
+    }
+
+    // Skip comment lines starting with '%'
+    while (std::getline(file, line)) {
+        if (!line.empty() && line[0] != '%') break;
+    }
+
+    // Parse dimensions: num_rows num_cols num_entries
+    std::stringstream dim_ss(line);
+    if (!(dim_ss >> header.rows >> header.cols >> header.entries)) {
+        throw std::runtime_error("Failed to parse matrix dimensions.");
+    }
+
+    return header;
+}
+
+template <typename Spec = Unweighted>
+DynamicGraph<Spec> read_mtx_dynamic_impl(std::ifstream& file, const MtxHeader& header) {
+    NodeIx n = std::max(header.cols, header.rows);
+    EdgeIx m = header.entries;
+    DynamicGraph<Spec> dg(n, m);
+
+    using weight_type = typename DynamicGraph<Spec>::weight_type;
+
+    NodeIx u = 0, v = 0;
+
+    while (file >> u >> v) {
+        if constexpr (UnweightedPolicy<weight_type>) {
+            dg.addEdge(u, v);
+        } else {
+            weight_type w{1};
+            if (header.value_type != MtxValueType::Unweighted) {
+                file >> w;
+            }
+            dg.addEdge(u, v, w);
         }
     }
 
-    NodeIx numNodes, fx, tx;
-    EdgeIx numEdges;
-
-    std::stringstream ss(line);
-    NodeIx garbage;
-    ss >> garbage >> numNodes >> numEdges;
-
-    std::vector<Edge> edges(numEdges);
-
-    EdgeIx eix;
-    for(eix = 0; eix < numEdges; eix++) {
-        infile >> fx >> tx;
-        edges.at(eix) = {fx-1, tx-1};
-    }
-    infile.close();
-
-    return {std::move(edges), numNodes, numEdges};
+    return dg;
 }
 
-void printGraph(const DynamicGraph& G) {
-    std::ofstream f;
-    f.open ("../graphs/G_dyn.txt");
-    f << G.numNodes << " " << G.numEdges << "\n";
-    for(auto& [fx, tx]: G.edges) {
-        if(fx == 0 && tx == 0) break;
-        if(fx == tx) printf("Self-loops not allowed!!");
-        f << static_cast<int>(fx) << " " << static_cast<int>(tx) << "\n";
-        f << static_cast<int>(tx) << " " << static_cast<int>(fx) << "\n";
+template <typename Spec>
+Graph<Spec> load_mtx_dynamic(const std::string& filepath) {
+    std::ifstream file(filepath);
+    if (!file.is_open()) {
+        throw std::runtime_error("Could not open file: " + filepath);
     }
-    f.close();
-}
 
-void printGraph(const Graph& G) {
-    std::ofstream f;
-    f.open ("../graphs/G.txt");
-    f << static_cast<int>(G.numNodes) << " " << static_cast<int>(G.numEdges) << "\n";
-    for(NodeIx nix = 0; nix < G.numNodes; nix++) {
-        ITER_EIX(G, nix, eix) {
-            NodeIx tx = G.edges.at(eix);
-            if(nix == tx) printf("Self-loops not allowed!!\t%d <-> %d\n", nix, tx);
-            f << static_cast<int>(nix) << " " << static_cast<int>(tx) << "\n";
+    MtxHeader header = parse_mtx_header(file);
+
+    switch (header.value_type) {
+        case MtxValueType::Unweighted: {
+            DynamicGraph<> dg = read_mtx_dynamic_impl<Unweighted>(file, header);
+            return dg.finalize();
+        }
+        case MtxValueType::Real: {
+            DynamicGraph<double> dg = read_mtx_dynamic_impl<double>(file, header);
+            return dg.finalize();
+        }
+        case MtxValueType::Integer: {
+            DynamicGraph<int64_t> dg = read_mtx_dynamic_impl<int64_t>(file, header);
+            return dg.finalize();
         }
     }
-    f.close();
+    throw std::runtime_error("Unknown MTX weight format.");
 }
-
 
 #endif //RCUT_IO_H
