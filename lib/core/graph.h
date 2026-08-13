@@ -7,14 +7,20 @@
 
 #include <type_traits>
 #include <algorithm>
+#include <vector>
 
 #include "definitions.h"
-#include <vector>
 
 #define NEIGHBORS(__g, __i) auto __end_it = __g.nend(__i); for(auto _it = __g.nbegin(__i); _it != __end_it; ++_it)
 #define NEIGHBORSPTR(__g, __i) auto __end_it = __g->nend(__i); for(auto _it = __g->nbegin(__i); _it != __end_it; ++_it)
-#define ITER_EIX_P(__g, __i, __eix) for(EdgeIx __eix = __g->ranges.at(__i); __eix < __g->ranges.at(__i+1); __eix++)
-#define ITER_EIX(__g, __i, __eix) for(EdgeIx __eix = __g.ranges.at(__i); __eix < __g.ranges.at(__i+1); __eix++)
+#define ITER_EIX_P(__g, __i, __eix) for(EdgeIx __eix = __g->ranges[__i]; __eix < __g->ranges[__i+1]; __eix++)
+#define ITER_EIX(__g, __i, __eix) for(EdgeIx __eix = __g.ranges[__i]; __eix < __g.ranges[__i+1]; __eix++)
+
+#if defined(_MSC_VER) && !defined(__clang__)
+    #define NO_UNIQUE_ADDRESS [[msvc::no_unique_address]]
+#else
+    #define NO_UNIQUE_ADDRESS [[no_unique_address]]
+#endif
 
 
 struct Unweighted {
@@ -73,22 +79,25 @@ template <typename T>
 struct is_weighted_policy<Weighted<T>> : std::true_type {};
 
 template <typename T>
-concept WeightPolicy = is_weighted_policy<T>::value || std::is_same_v<T, Unweighted>;
+concept UnweightedPolicy = std::is_same_v<T, Unweighted>;
 
+template <typename T>
+concept WeightPolicy = is_weighted_policy<T>::value || UnweightedPolicy<T>;
+
+// If Spec is already a policy (Unweighted or Weighted<T>), use it directly.
+// Otherwise, assume it's a scalar (like double) and wrap it in Weighted<Spec>.
+template <typename Spec>
+using select_policy_t = std::conditional_t<
+    WeightPolicy<Spec>,
+    Spec,
+    Weighted<Spec>
+>;
 
 template <typename Spec = Unweighted>
 class Graph {
 
-    // If Spec is already a policy (Unweighted or Weighted<T>), use it directly.
-    // Otherwise, assume it's a scalar (like double) and wrap it in Weighted<Spec>.
-    using Policy = std::conditional_t<
-        WeightPolicy<Spec>,
-        Spec,
-        Weighted<Spec>
-    >;
-
-    [[no_unique_address]]
-    Policy weights{0};
+    using Policy = select_policy_t<Spec>;
+    NO_UNIQUE_ADDRESS Policy weights{0};
 
 public:
     using weight_type = typename Policy::weight_type;
@@ -99,21 +108,17 @@ public:
     std::vector<NodeIx> edges;          // size: 2 * numEdges
     std::vector<EdgeIx> ranges;         // size: numNodes + 1
 
-
-    // std::vector<EdgeIx> map;            // in an undirected graph: maps edge in one direction to its counterpart edge
-//    std::vector<EdgeIx> edgeToNode;
-
-
     Graph() = default;
 
     Graph(NodeIx n, EdgeIx m) :
         numNodes{n}, numEdges{m}, edges(2 * m), ranges(n + 1), weights(2 * m) {}
 
-    Graph(std::vector<NodeIx>&& ed, std::vector<EdgeIx>&& rg, NodeIx n, EdgeIx m) :
-            numNodes{n}, numEdges{m}, edges(std::move(ed)), ranges(std::move(rg)), weights(2 * m) {
+    Graph(NodeIx n, EdgeIx m, std::vector<NodeIx>&& ed, std::vector<EdgeIx>&& rg) :
+        numNodes{n}, numEdges{m}, edges(std::move(ed)), ranges(std::move(rg)), weights(2 * m) {
     }
-    Graph(std::vector<NodeIx>&& ed, std::vector<EdgeIx>&& rg, std::vector<EdgeWeight>&& wgt, NodeIx n, EdgeIx m) :
-            numNodes{n}, numEdges{m}, edges(std::move(ed)), ranges(std::move(rg)), weights(std::move(wgt)) {
+    Graph(NodeIx n, EdgeIx m, std::vector<NodeIx>&& ed, std::vector<EdgeIx>&& rg, std::vector<weight_type>&& wgt)
+        requires (!UnweightedPolicy<Policy>) :
+        numNodes{n}, numEdges{m}, edges(std::move(ed)), ranges(std::move(rg)), weights(std::move(wgt)) {
     }
 
     // Forbid Copying
@@ -123,14 +128,6 @@ public:
     // Allow Moving
     Graph(Graph&&) noexcept = default;
     Graph& operator=(Graph&&) noexcept = default;
-
-//    void populateEdgeLookup() {
-//        NodeIx nix = 0;
-//        for(EdgeIx eix = 0; eix < 2 * numEdges; eix++) {
-//            while(ranges[nix+1] <= eix) nix++;
-//            edgeToNode[eix] = nix;
-//        }
-//    }
 
     [[nodiscard]] std::vector<NodeIx>::iterator nbegin(NodeIx node) {
         return edges.begin() + ranges[node];
@@ -149,7 +146,7 @@ public:
     }
 
     [[nodiscard]] EdgeIx startIndex(NodeIx node) const {
-        return ranges.at(node);
+        return ranges[node];
     }
 
     [[nodiscard]] weight_type edgeWeight(EdgeIx e) const {
@@ -169,8 +166,13 @@ public:
     // }
 };
 
-template <typename WeightPolicy = Unweighted>
+template <typename Spec = Unweighted>
 class DynamicGraph {
+
+    using Policy = select_policy_t<Spec>;
+    NO_UNIQUE_ADDRESS Policy weights{0};
+
+public:
     struct Edge {
         NodeIx fx{0}, tx{0}; // from index, to index
 
@@ -183,32 +185,31 @@ class DynamicGraph {
         }
     };
 
-public:
-    using weight_type = typename WeightPolicy::weight_type;
+    using weight_type = typename Policy::weight_type;
 
     NodeIx numNodes{0};
     EdgeIx numEdges{0};
 
     std::vector<Edge> edges{};
-    WeightPolicy weights{0};
+
+    DynamicGraph() = default;
 
     DynamicGraph(NodeIx n, EdgeIx m, std::vector<Edge>&& eg) : numNodes(n), numEdges(m), edges(std::move(eg)), weights(m) {}
 
     DynamicGraph(NodeIx n, EdgeIx m, std::vector<Edge>&& eg, std::vector<weight_type>&& wgts) : numNodes(n), numEdges(m), edges(std::move(eg)), weights(std::move(wgts)) {}
 
+    // Forbid Copying
+    DynamicGraph(const DynamicGraph&) = delete;
+    DynamicGraph& operator=(const DynamicGraph&) = delete;
+
+    // Allow Moving
+    DynamicGraph(DynamicGraph&&) noexcept = default;
+    DynamicGraph& operator=(DynamicGraph&&) noexcept = default;
+
     void addEdge(NodeIx fx, NodeIx tx, weight_type w = weight_type{1}) {
         edges.emplace_back(std::min(fx, tx), std::max(fx, tx));
         weights.push_back(std::move(w));
         numEdges++;
-    }
-
-    void removeEdge(NodeIx fx, NodeIx tx) {
-        if (fx > tx) std::swap(fx, tx);
-        auto eit = std::find(edges.begin(), edges.end(), Edge{fx, tx});
-        if (eit != edges.end()) {
-            const auto ix = static_cast<EdgeIx>(std::distance(edges.begin(), eit));
-            removeEdgeByIx(ix);
-        }
     }
 
     void popEdge() {
@@ -218,7 +219,7 @@ public:
     }
 
     void removeEdgeByIx(EdgeIx eix) {
-        std::swap(edges.at(eix), edges.back());
+        std::swap(edges[eix], edges.back());
         weights.swap_to_back(eix);
         popEdge();
     }
@@ -227,45 +228,64 @@ public:
         return numNodes++;
     }
 
-    /// Convert this DynamicGraph instance to a Graph in CSR format
-    Graph<WeightPolicy> finalize() const {
-        if(edges.empty()) return {};
-        std::vector<Edge> fullEdges(2 * numEdges);
-        std::vector<EdgeIx> rg(numNodes + 1);
-        // std::vector<EdgeIx> map(2 * numEdges);
+    [[nodiscard]] weight_type edgeWeight(EdgeIx e) const { return weights[e]; }
+    [[nodiscard]] const Edge& edge(EdgeIx e) const { return edges[e]; }
 
-        EdgeIx eix = 0;
-        for(const auto& [fx, tx]: edges) {
-            fullEdges.at(eix++) = {fx, tx};
-            fullEdges.at(eix++) = {tx, fx};
+    /// Convert this DynamicGraph instance to a Graph in CSR format
+    [[nodiscard]] Graph<Spec> finalize() const {
+        std::vector<NodeIx> eg(2 * numEdges);
+        std::vector<EdgeIx> rg(numNodes + 1, 0);
+        std::vector<weight_type> wgt;
+
+        // Allocate weights only if the policy actually uses them
+        if constexpr (!UnweightedPolicy<Policy>) {
+            wgt.resize(2 * numEdges);
         }
 
-        std::sort(fullEdges.begin(), fullEdges.end(), [](const Edge& a, const Edge& b){
+        // Temporary structure to hold directed edge + weight during sorting
+        struct FullEdge {
+            NodeIx fx;
+            NodeIx tx;
+            weight_type weight;
+        };
+
+        std::vector<FullEdge> fullEdges;
+        fullEdges.reserve(2 * numEdges);
+
+        for (EdgeIx i = 0; i < numEdges; ++i) {
+            const auto& [fx, tx] = edges[i];
+            weight_type w = edgeWeight(i);
+
+            fullEdges.push_back({fx, tx, w});
+            fullEdges.push_back({tx, fx, w});
+        }
+
+        // Sort edges by source node (fx), then target node (tx)
+        std::sort(fullEdges.begin(), fullEdges.end(), [](const FullEdge& a, const FullEdge& b) {
             return a.fx == b.fx ? a.tx < b.tx : a.fx < b.fx;
         });
 
-        eix = 0;
+        // Build CSR ranges and edges (and weights if applicable)
+        EdgeIx eix = 0;
         NodeIx nix = 0;
-        std::vector<NodeIx> eg(2 * numEdges);
-        while(nix < numNodes) {
-            rg.at(nix) = eix;
-            while(eix < fullEdges.size() && fullEdges.at(eix).fx == nix) {
+        while (nix < numNodes) {
+            rg[nix] = eix;
+            while (eix < fullEdges.size() && fullEdges[eix].fx == nix) {
+                eg[eix] = fullEdges[eix].tx;
+                if constexpr (!UnweightedPolicy<Policy>) {
+                    wgt[eix] = fullEdges[eix].weight;
+                }
                 eix++;
             }
             nix++;
         }
-        rg.at(numNodes) = eix;
+        rg[numNodes] = eix;
 
-        std::vector<EdgeIx> tmp(rg);
-        for(eix = 0; eix < 2 * numEdges; eix++) {
-            Edge e = fullEdges.at(eix);
-            // EdgeIx pix = tmp.at(e.tx)++;
-            // map.at(eix) = pix;
-            // map.at(pix) = eix;
-            eg.at(eix) = e.tx;
+        if constexpr (UnweightedPolicy<Policy>) {
+            return Graph<Spec>(numNodes, numEdges, std::move(eg), std::move(rg));
+        } else {
+            return Graph<Spec>(numNodes, numEdges, std::move(eg), std::move(rg), std::move(wgt));
         }
-
-        return {std::move(eg), std::move(rg), numNodes, numEdges};
     }
 };
 
