@@ -79,32 +79,30 @@ public:
 };
 
 
-template <typename T>
-struct is_weight_policy : std::false_type {};
-
-
-template <typename T>
-struct is_weight_policy<Weighted<T>> : std::true_type {};
-
+template <typename>
+struct is_weighted_policy : std::false_type {};
 
 template <typename T>
-concept WeightPolicy = std::same_as<T, Unweighted> || is_weight_policy<T>::value;
+struct is_weighted_policy<Weighted<T>> : std::true_type {};
+
+template <typename T>
+concept ValidWeightPolicy = std::same_as<T, Unweighted> || is_weighted_policy<T>::value;
 
 template <typename T>
 using select_policy_t = std::conditional_t<
-    WeightPolicy<T>,
+    ValidWeightPolicy<T>,
     T,
     Weighted<T>
 >;
 
 template <typename Spec = Unweighted>
-class Graph {
-    using Policy = select_policy_t<Spec>;
+class CsrGraph {
 
+    using Policy = select_policy_t<Spec>;
     NO_UNIQUE_ADDRESS Policy weights{0};
 
 public:
-    using weight_type = typename Policy::weight_type;
+    using EdgeWeight = typename Policy::weight_type;
 
     NodeIx numNodes{0};
     EdgeIx numEdges{0};                 // number of undirected edges
@@ -112,27 +110,27 @@ public:
     std::vector<NodeIx> edges;          // size: 2 * numEdges
     std::vector<EdgeIx> ranges;         // size: numNodes + 1
 
-    Graph() = default;
+    CsrGraph() = default;
 
-    Graph(NodeIx n, EdgeIx m) :
+    CsrGraph(NodeIx n, EdgeIx m) :
         numNodes{n}, numEdges{m}, edges(2 * m), ranges(n + 1), weights(2 * m) {}
 
-    Graph(NodeIx n, EdgeIx m, std::vector<NodeIx>&& ed, std::vector<EdgeIx>&& rg) :
+    CsrGraph(NodeIx n, EdgeIx m, std::vector<NodeIx>&& ed, std::vector<EdgeIx>&& rg) :
         numNodes{n}, numEdges{m}, edges(std::move(ed)), ranges(std::move(rg)), weights(2 * m) {
     }
 
-    Graph(NodeIx n, EdgeIx m, std::vector<NodeIx>&& ed, std::vector<EdgeIx>&& rg, std::vector<weight_type>&& wgt)
+    CsrGraph(NodeIx n, EdgeIx m, std::vector<NodeIx>&& ed, std::vector<EdgeIx>&& rg, std::vector<EdgeWeight>&& wgt)
         requires (!std::same_as<Policy, Unweighted>) :
         numNodes{n}, numEdges{m}, edges(std::move(ed)), ranges(std::move(rg)), weights(std::move(wgt)) {
     }
 
     // Forbid Copying
-    Graph(const Graph&) = delete;
-    Graph& operator=(const Graph&) = delete;
+    CsrGraph(const CsrGraph&) = delete;
+    CsrGraph& operator=(const CsrGraph&) = delete;
 
     // Allow Moving
-    Graph(Graph&&) noexcept = default;
-    Graph& operator=(Graph&&) noexcept = default;
+    CsrGraph(CsrGraph&&) noexcept = default;
+    CsrGraph& operator=(CsrGraph&&) noexcept = default;
 
 
     [[nodiscard]]
@@ -182,7 +180,7 @@ public:
     }
 
     [[nodiscard]]
-    weight_type edgeWeight(EdgeIx edge) const noexcept {
+    EdgeWeight edgeWeight(EdgeIx edge) const noexcept {
         return weights[edge];
     }
 };
@@ -270,7 +268,7 @@ public:
     }
 
     [[nodiscard]]
-    Graph<Spec> finalize() const {
+    CsrGraph<Spec> finalize() const {
         std::vector<NodeIx> csrEdges(2 * numEdges);
         std::vector<EdgeIx> ranges(numNodes + 1);
 
@@ -297,7 +295,7 @@ public:
                 csrEdges[next[edge.tx]++] = edge.fx;
             }
 
-            return Graph<Spec>(
+            return CsrGraph<Spec>(
                 numNodes, numEdges, std::move(csrEdges), std::move(ranges)
             );
 
@@ -317,7 +315,7 @@ public:
                 ++next[edge.tx];
             }
 
-            return Graph<Spec>(
+            return CsrGraph<Spec>(
                 numNodes, numEdges, std::move(csrEdges), std::move(ranges), std::move(csrWeights)
             );
         }

@@ -5,72 +5,73 @@
 #ifndef RCUT_PARTITION_H
 #define RCUT_PARTITION_H
 
+#include <memory>
+
 #include "graph.h"
 //#include "../utils/skiplist.h"
 
-// Contains the information of a node within its cluster. All values are restricted to be within the same cluster, no self-loops.
-struct ClusterVertex {
-    NodeIx nix;
-    EdgeIx end; // redundant with internalDegree
-    EdgeWeight internalDegree;
 
-    bool operator==(const ClusterVertex& other) const = default;
-};
+template<typename Graph>
+class DFS;
 
-struct PrefixValues {
-    EdgeIx edgeDiff;
-    EdgeIx vol;
-};
 
 struct SweepCut {
     frac_t sparsity;
     NodeIx offset;
-    std::vector<PrefixValues> pS;
-};
-
-class Partition;
-
-/// Represents a single part in a Partition of a Graph
-struct Cluster {
-    EdgeWeight internalVolume{}, volume{};
-    NodeIx nodeBegin{}, nodeEnd{};
-    Partition* partition{};
-
-    [[nodiscard]] NodeIx size() const {
-        return nodeEnd - nodeBegin;
-    }
-
-    [[nodiscard]] std::vector<ClusterVertex>::iterator begin() const;
-
-    [[nodiscard]] std::vector<ClusterVertex>::iterator end() const;
-
-    [[nodiscard]] std::vector<NodeIx>::iterator edgeBegin(const ClusterVertex& cv) const;
-
-    [[nodiscard]] std::vector<NodeIx>::iterator edgeEnd(const ClusterVertex& cv) const;
-
-    bool operator==(const Cluster& other) const = default;
-};
-
-class DFS {
-    std::vector<NodeIx> m_visited;
-    std::vector<NodeIx> m_labels;
-    std::vector<NodeIx> m_stack;
-    NodeIx numCalls{0};
-    const Partition* partition;
-
-public:
-    DFS(const Partition* part, NodeIx n) : m_visited(n), m_labels(n), m_stack(n), partition{part} {}
-
-    NodeIx computeLabels(const Cluster& cluster);
-
-    [[nodiscard]] const std::vector<NodeIx>& labels() const {
-        return m_labels;
-    }
 };
 
 
 /// Represents a Partition of a Graph, i.e., a decomposition of the graph into Clusters.
+template<typename Graph>
 class Partition {
+public:
+    using EdgeWeight = Graph::EdgeWeight;
+
+    /// Contains the information of a node within its cluster. All values are restricted to be within the same cluster, no self-loops.
+    struct ClusterVertex {
+        NodeIx nix;
+        EdgeIx end;
+        EdgeWeight internalDegree;
+
+        bool operator==(const ClusterVertex& other) const = default;
+    };
+
+    /// Represents a single part in a Partition of a Graph
+    struct Cluster {
+        EdgeWeight internalVolume{}, volume{};
+        NodeIx nodeBegin{}, nodeEnd{};
+        Partition* partition{};
+
+        [[nodiscard]]
+        NodeIx size() const {
+            return nodeEnd - nodeBegin;
+        }
+
+        [[nodiscard]]
+        std::vector<ClusterVertex>::iterator begin() const {
+            return partition->clusterVertices.begin() + nodeBegin;
+        }
+
+        [[nodiscard]]
+        std::vector<ClusterVertex>::iterator end() const {
+            return partition->clusterVertices.begin() + nodeEnd;
+        }
+
+        [[nodiscard]]
+        std::vector<NodeIx>::iterator edgeBegin(const ClusterVertex& cv) const {
+            return partition->graph->nbegin(cv.nix);
+        }
+
+        [[nodiscard]]
+        std::vector<NodeIx>::iterator edgeEnd(const ClusterVertex& cv) const {
+            return partition->graph->edges.begin() + cv.end;
+        }
+
+        bool operator==(const Cluster& other) const = default;
+    };
+
+
+private:
     // guarantees that the index of any Cluster never changes (i.e., no deletions)
     std::vector<Cluster> clusters;
     std::vector<ClusterVertex> clusterVertices;
@@ -80,9 +81,8 @@ class Partition {
     std::vector<EdgeIx> sc_removeAt; // tracks number of edges ending at given node, used in sweepCut procedure.
     EdgeIx numCutEdges;
     EdgeWeight cutSize;
-    DFS dfs;
+    std::unique_ptr<DFS<Graph>> dfs;
     Graph* graph;
-    friend Cluster;
 
 public:
 //    SkipList sl;
@@ -107,37 +107,45 @@ public:
     SweepCut sweepCut(NodeIx clusterId, const T& values);
 
     template<typename T>
-    inline void sortCluster(const Cluster& cluster, const T& values);
+    void sortCluster(const Cluster& cluster, const T& values);
 
-    [[nodiscard]] NodeIx numClusters() const {
+    [[nodiscard]]
+    NodeIx numClusters() const {
         return static_cast<NodeIx>(clusters.size());
     }
 
-    [[nodiscard]] const Cluster& getCluster(NodeIx clusterId) const {
+    [[nodiscard]]
+    const Cluster& getCluster(NodeIx clusterId) const {
         return clusters[clusterId];
     }
 
-    [[nodiscard]] EdgeIx getNumCutEdges() const {
+    [[nodiscard]]
+    EdgeIx getNumCutEdges() const {
         return numCutEdges;
     }
 
-    [[nodiscard]] EdgeWeight getCutSize() const {
+    [[nodiscard]]
+    EdgeWeight getCutSize() const {
         return cutSize;
     }
 
-    [[nodiscard]] const Graph& getGraph() const {
+    [[nodiscard]]
+    const Graph& getGraph() const {
         return *graph;
     }
 
-    [[nodiscard]] const ClusterVertex& vertexFor(NodeIx nix) const {
+    [[nodiscard]]
+    const ClusterVertex& vertexFor(NodeIx nix) const {
         return clusterVertices[lookup[nix]];
     }
 
-    [[nodiscard]] inline std::vector<Cluster>::const_iterator begin() const {
+    [[nodiscard]]
+    std::vector<Cluster>::const_iterator begin() const {
         return clusters.begin();
     }
 
-    [[nodiscard]] inline std::vector<Cluster>::const_iterator end() const {
+    [[nodiscard]]
+    std::vector<Cluster>::const_iterator end() const {
         return clusters.end();
     }
 
@@ -146,10 +154,58 @@ public:
             cluster.partition = this;
         }
     }
-};
+}; // class Partition
 
+
+template<typename Graph>
+using Cluster = Partition<typename Graph::EdgeWeight>::Cluster;
+
+template<typename Graph>
+using ClusterVertex = Partition<typename Graph::EdgeWeight>::ClusterVertex;
+
+template<typename Graph>
+Partition<Graph>::Partition(Graph* gr) :
+        clusters(1),
+        clusterVertices(gr->numNodes),
+        splitOracle(gr->numNodes),
+        lookup(gr->numNodes),
+        sc_seen(gr->numNodes),
+        sc_removeAt(gr->numNodes),
+        numCutEdges{0},
+        cutSize{0},
+        dfs(this, gr->numNodes),
+        graph{gr}
+//        sl(2 * gr.numEdges)
+{
+    EdgeIx volume{0};
+
+    for(NodeIx nix = 0; nix < gr->numNodes; ++nix) {
+        EdgeIx degree = gr->ranges[nix+1] - gr->ranges[nix];
+        clusterVertices[nix] = {
+            nix, gr->ranges[nix+1], degree
+    };
+        volume += gr->ranges[nix+1] - gr->ranges[nix];
+        lookup[nix] = nix;
+    }
+
+    clusters[0] = {volume, volume, 0, gr->numNodes, this};
+
+    std::vector<NodeIx> mod; // a bit ugly
+    // consolidate(0, mod);
+}
+
+template<typename Graph>
+void Partition<Graph>::consolidate(NodeIx clusterId, std::vector<NodeIx>& modified) {
+    NodeIx subclusters = dfs.computeLabels(clusters[clusterId]);
+    if(subclusters > 1) {
+        INFO("Cluster consists of " << subclusters << " subclusters. Splitting.");
+        splitByIndices<true, false>(clusterId, dfs.labels(), subclusters, modified);
+    }
+}
+
+template<typename Graph>
 template<typename T>
-void Partition::sortCluster(const Cluster &cluster, const T& values)  {
+void Partition<Graph>::sortCluster(const Cluster &cluster, const T& values)  {
     // stable sort is actually preferred over regular sort to avoid unnecessary jumps in iterations later
     std::stable_sort(clusterVertices.begin() + cluster.nodeBegin, clusterVertices.begin() + cluster.nodeEnd,
                      [&values](const ClusterVertex& u, const ClusterVertex& v) { return values[u.nix] < values[v.nix]; }
@@ -159,8 +215,9 @@ void Partition::sortCluster(const Cluster &cluster, const T& values)  {
     }
 }
 
+template<typename Graph>
 template<bool requiresSort, bool consolidatePieces, typename T>
-EdgeIx Partition::splitByIndices(NodeIx clusterId, const T& values, NodeIx numParts, std::vector<NodeIx>& modified) {
+EdgeIx Partition<Graph>::splitByIndices(NodeIx clusterId, const T& values, NodeIx numParts, std::vector<NodeIx>& modified) {
     Cluster& current = clusters[clusterId];
     std::vector<Cluster> others(numParts, {0, 0, 0, 0, this });
     std::vector<NodeIx> counts(numParts);
@@ -223,8 +280,9 @@ EdgeIx Partition::splitByIndices(NodeIx clusterId, const T& values, NodeIx numPa
     return extraCutEdges;
 }
 
+template<typename Graph>
 template<bool requiresSort, bool consolidatePieces>
-void Partition::split(NodeIx clusterId, NodeIx offset, std::vector<NodeIx>& modified) {
+void Partition<Graph>::split(NodeIx clusterId, NodeIx offset, std::vector<NodeIx>& modified) {
     // prepare splitOracle to contain 0 for every node on one side and 1 for every node on the other side of the cut
     NodeIx ix = 0;
     for(const ClusterVertex& cv: clusters[clusterId]) {
@@ -235,8 +293,9 @@ void Partition::split(NodeIx clusterId, NodeIx offset, std::vector<NodeIx>& modi
     splitByIndices<requiresSort, consolidatePieces>(clusterId, splitOracle, 2, modified);
 }
 
+template<typename Graph>
 template<typename T>
-SweepCut Partition::sweepCut(NodeIx clusterId, const T& values) {
+SweepCut Partition<Graph>::sweepCut(NodeIx clusterId, const T& values) {
     const Cluster& current = clusters[clusterId];
 
     EdgeIx cutEdges = 0;
@@ -247,12 +306,8 @@ SweepCut Partition::sweepCut(NodeIx clusterId, const T& values) {
 
     sortCluster(current, values);
 
-    std::vector<PrefixValues> prefixes(current.size());
-
     for(const ClusterVertex& cv: current) {
         cutVolume += cv.internalDegree; // graph->degree(cv.nix);
-
-        prefixes[offset].vol = cutVolume;
 
         for(auto it = current.edgeBegin(cv); it != current.edgeEnd(cv); ++it) {
             NodeIx nb = *it;
@@ -269,9 +324,6 @@ SweepCut Partition::sweepCut(NodeIx clusterId, const T& values) {
         cutEdges -= sc_removeAt[cv.nix]; // edge ends at nix, it no longer crosses the cut
         sc_removeAt[cv.nix] = 0;
 
-        prefixes[offset].edgeDiff = cutEdges;
-//        prefixes[offset].nix = cv.nix;
-
         if(cutVolume == current.internalVolume) break;
 
         frac_t denom = static_cast<frac_t>(std::min(cutVolume, current.internalVolume - cutVolume));
@@ -287,11 +339,107 @@ SweepCut Partition::sweepCut(NodeIx clusterId, const T& values) {
 
     for(const ClusterVertex& cv: current) sc_seen[cv.nix] = 0;
 
-    return {bestCut.sparsity, bestCut.offset, std::move(prefixes)};
+    return {bestCut.sparsity, bestCut.offset};
 }
 
-void checkCluster(const Cluster& cluster, const Graph& graph);
 
-frac_t compute_normalized_cut(const Partition& part);
+template<typename Graph>
+class DFS {
+    std::vector<NodeIx> m_visited;
+    std::vector<NodeIx> m_labels;
+    std::vector<NodeIx> m_stack;
+    NodeIx numCalls{0};
+    const Partition<Graph>* partition;
+
+public:
+    DFS(const Partition<Graph>* part, NodeIx n) : m_visited(n), m_labels(n), m_stack(n), partition{part} {}
+
+    NodeIx computeLabels(const Cluster<Graph>& cluster);
+
+    [[nodiscard]]
+    const std::vector<NodeIx>& labels() const {
+        return m_labels;
+    }
+};
+
+template<typename Graph>
+NodeIx DFS<Graph>::computeLabels(const Cluster<Graph>& cluster) {
+    NodeIx numComponents = 0;
+    NodeIx qix = 0;
+
+    numCalls++;
+
+    for (const ClusterVertex<Graph>& cv: cluster) {
+        if (m_visited[cv.nix] == numCalls) {
+            continue;
+        }
+
+        m_stack[qix++] = cv.nix;
+        m_visited[cv.nix] = numCalls;
+        m_labels[cv.nix] = numComponents;
+
+        // Run DFS starting from cv.nix
+        while (qix) {
+            NodeIx u = m_stack[--qix];
+            const ClusterVertex<Graph>& cvx = partition->vertexFor(u);
+
+            for (auto it = cluster.edgeBegin(cvx); it != cluster.edgeEnd(cvx); ++it) {
+                NodeIx nb = *it;
+
+                if (m_visited[nb] < numCalls) {
+                    m_visited[nb] = numCalls;
+                    m_labels[nb] = numComponents;
+                    m_stack[qix++] = nb;
+                }
+            }
+        }
+
+        numComponents++;
+    }
+
+    return numComponents;
+}
+
+
+template<typename Graph>
+void checkCluster(const Cluster<Graph>& cluster, const Graph& graph) {
+    EdgeIx sumDegrees = 0, summedVol = 0;
+    assert(cluster.nodeBegin <= cluster.nodeEnd);
+    for(const ClusterVertex<Graph>& cv: cluster) {
+        assert(cluster.edgeBegin(cv) == graph.nbegin(cv.nix));
+        assert(cv.end == std::distance(graph.edges.begin(), graph.nbegin(cv.nix) + cv.internalDegree));
+        assert(cv.end <= std::distance(graph.edges.begin(), graph.nend(cv.nix)));
+
+        for(auto it = cluster.edgeBegin(cv); it != cluster.edgeEnd(cv); ++it) {
+            NodeIx nb = *it;
+            auto itx = std::find_if(graph.nbegin(cv.nix), graph.nend(cv.nix),
+                                    [&nb](NodeIx otherNix) { return otherNix == nb; } );
+            assert(itx != graph.nend(cv.nix));
+
+            auto it2 = std::find_if(cluster.begin(), cluster.end(),
+                                    [&nb](const ClusterVertex<Graph>& node) { return node.nix == nb; } );
+            assert(it2 != cluster.end());
+        }
+
+        assert(cv.internalDegree == std::distance(cluster.edgeBegin(cv), cluster.edgeEnd(cv)));
+        sumDegrees += cv.internalDegree;
+        summedVol += graph.degree(cv.nix);
+    }
+    assert(summedVol == cluster.volume);
+    assert(sumDegrees == cluster.internalVolume);
+}
+
+template<typename Graph>
+frac_t compute_normalized_cut(const Partition<Graph>& part) {
+    frac_t normalized_cut = 0.0;
+
+    for(const Cluster<Graph>& cl: part) {
+        if(cl.volume == 0) continue;
+        normalized_cut += static_cast<frac_t>(cl.volume - cl.internalVolume) / cl.volume;
+    }
+
+    return normalized_cut;
+}
+
 
 #endif //RCUT_PARTITION_H

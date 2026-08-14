@@ -1,5 +1,6 @@
-#include "algorithms/expander_decomposition/cpu.h"
-#include "algorithms/applications/normalized_cut.h"
+// #include "algorithms/expander_decomposition/cpu.h"
+// #include "algorithms/applications/normalized_cut.h"
+#include "core/partition.h"
 #include "utils/graph_io.h"
 #include "utils/timer.h"
 
@@ -7,8 +8,8 @@
 #include "algorithms/expander_decomposition/cuda.h"
 #endif
 
-#include "algorithms/expander_decomposition/random_walk.h"
-#include "algorithms/tree_cut_sparsifier_evaluation/evaluator.h"
+// #include "algorithms/expander_decomposition/random_walk.h"
+// #include "algorithms/tree_cut_sparsifier_evaluation/evaluator.h"
 
 void checkBuildMode() {
     #ifdef NDEBUG
@@ -18,33 +19,40 @@ void checkBuildMode() {
     #endif
 }
 
-void suite(Graph& G) {
-    int numRounds = 10;
+// void suite(Graph& G) {
+//     int numRounds = 10;
+//
+//     double maxVal = 0;
+//     double minVal = 999.0;
+//
+//     Timer t;
+//
+//     for (int i = 0; i < numRounds; ++i) {
+//         ExpanderHierarchy eh{&G};
+//
+//         t.start();
+//         eh.build();
+//         auto millis = t.timeMillis();
+//
+//         NormalizedCut nc{&eh};
+//
+//         Partition kPart = nc.compute(16);
+//
+//         double ncVal = compute_normalized_cut(kPart);
+//         if (ncVal > maxVal) maxVal = ncVal;
+//         if (ncVal < minVal) minVal = ncVal;
+//
+//         std::cout << "Guess: " << ncVal  << "\t [" << millis/1000.0 << "s]" << std::endl;
+//     }
+//
+//     std::cout << "\n=============================\n -> " << maxVal << "\n -> " << minVal << std::endl;
+// }
 
-    double maxVal = 0;
-    double minVal = 999.0;
+template <typename Graph>
+void run(Graph& G) {
+    int x = G.numNodes;
 
-    Timer t;
-
-    for (int i = 0; i < numRounds; ++i) {
-        ExpanderHierarchy eh{&G};
-
-        t.start();
-        eh.build();
-        auto millis = t.timeMillis();
-
-        NormalizedCut nc{&eh};
-
-        Partition kPart = nc.compute(16);
-
-        double ncVal = compute_normalized_cut(kPart);
-        if (ncVal > maxVal) maxVal = ncVal;
-        if (ncVal < minVal) minVal = ncVal;
-
-        std::cout << "Guess: " << ncVal  << "\t [" << millis/1000.0 << "s]" << std::endl;
-    }
-
-    std::cout << "\n=============================\n -> " << maxVal << "\n -> " << minVal << std::endl;
+    auto partition = Partition<Graph>(G);
 }
 
 int main(int argc, char* argv[]) {
@@ -52,10 +60,12 @@ int main(int argc, char* argv[]) {
 
     std::string filename = argv[1];
 
-    DynamicGraph G_dyn = readDynGraph(filename);
-    Graph G = G_dyn.finalize();
+    auto G = load_mtx_dynamic(filename);
 
-    suite(G);
+    std::visit([](const auto& graph) {
+        run(graph);
+    }, G);
+
 
     // ExpanderHierarchy eh{&G};
     // eh.build();
@@ -76,6 +86,7 @@ int main(int argc, char* argv[]) {
     // std::cout << "Guess: " << guess << std::endl;
 }
 
+/**
 
 int main2(int argc, char* argv[]) {
     if (argc < 2) {
@@ -220,3 +231,6 @@ void test2(Graph& G) {
     std::cout << (G == G2) << std::endl;
 #endif
 }
+
+
+**/

@@ -6,6 +6,7 @@
 #define RCUT_DEFINITIONS_H
 
 #include <cassert>
+#include <cstdint>
 
 #ifdef DEBUG
 #include <iostream>
@@ -19,10 +20,10 @@
 #define WARN(msg) (std::cout << "[WARNING] " << msg << "!" << std::endl)
 #endif
 
-using NodeIx        = unsigned int;
-using EdgeIx        = unsigned int;
-using EdgeWeight    = unsigned int;
+using NodeIx        = uint32_t;
+using EdgeIx        = uint32_t;
 using frac_t        = double;
+using int_t         = int64_t;
 
 inline unsigned int randSeed{6582};
 

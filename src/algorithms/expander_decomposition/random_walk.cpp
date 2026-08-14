@@ -16,6 +16,7 @@ const std::valarray<frac_t>& RandomWalk::values() {
 void RandomWalk::iterate(const Partition& part, const std::vector<NodeIx>& active) {
     std::swap(m_old_distribution, m_distribution);
     m_distribution = 0;
+    // TODO: idea: use skiplist on active nodes ( not edges)
 
     for(NodeIx clusterId: active) {
         const Cluster& cluster = part.getCluster(clusterId);

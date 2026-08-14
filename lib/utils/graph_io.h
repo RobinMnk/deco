@@ -13,6 +13,13 @@
 #include <unordered_map>
 #include <stdexcept>
 #include <cstdint>
+#include <variant>
+
+using AnyGraph = std::variant<
+    CsrGraph<>,
+    CsrGraph<int_t>,
+    CsrGraph<frac_t>
+>;
 
 enum class MtxValueType { Unweighted, Real, Integer };
 enum class MtxSymmetry  { General, Symmetric, SkewSymmetric };
@@ -85,11 +92,12 @@ DynamicGraph<Spec> read_mtx_dynamic_impl(std::ifstream& file, const MtxHeader& h
     DynamicGraph<Spec> dg(n, m);
 
     using weight_type = typename DynamicGraph<Spec>::weight_type;
+    using Policy = select_policy_t<Spec>;
 
     NodeIx u = 0, v = 0;
 
     while (file >> u >> v) {
-        if constexpr (UnweightedPolicy<weight_type>) {
+        if constexpr (is_weighted_policy<Policy>::value) {
             dg.addEdge(u, v);
         } else {
             weight_type w{1};
@@ -103,8 +111,7 @@ DynamicGraph<Spec> read_mtx_dynamic_impl(std::ifstream& file, const MtxHeader& h
     return dg;
 }
 
-template <typename Spec>
-Graph<Spec> load_mtx_dynamic(const std::string& filepath) {
+inline AnyGraph load_mtx_dynamic(const std::string& filepath) {
     std::ifstream file(filepath);
     if (!file.is_open()) {
         throw std::runtime_error("Could not open file: " + filepath);
@@ -114,7 +121,7 @@ Graph<Spec> load_mtx_dynamic(const std::string& filepath) {
 
     switch (header.value_type) {
         case MtxValueType::Unweighted: {
-            DynamicGraph<> dg = read_mtx_dynamic_impl<Unweighted>(file, header);
+            DynamicGraph<> dg = read_mtx_dynamic_impl(file, header);
             return dg.finalize();
         }
         case MtxValueType::Real: {
