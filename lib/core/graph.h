@@ -185,6 +185,29 @@ public:
     }
 };
 
+template<typename G>
+concept GraphLike = requires(G& g, const G& cg, NodeIx node, EdgeIx eix) {
+    typename G::EdgeWeight;
+
+    { g.numNodes } -> std::convertible_to<NodeIx>;
+    { g.numEdges } -> std::convertible_to<EdgeIx>;
+
+    { g.edges } -> std::same_as<std::vector<NodeIx>&>;
+    { cg.edges } -> std::same_as<const std::vector<NodeIx>&>;
+
+    { g.ranges } -> std::same_as<std::vector<EdgeIx>&>;
+    { cg.ranges } -> std::same_as<const std::vector<EdgeIx>&>;
+
+    { g.nbegin(node) };
+    { g.nend(node) };
+    { cg.nbegin(node) };
+    { cg.nend(node) };
+
+    { cg.degree(node) } -> std::same_as<EdgeIx>;
+    { cg.edgeWeight(eix) } -> std::convertible_to<typename G::EdgeWeight>;
+};
+
+
 template <typename Spec = Unweighted>
 class DynamicGraph {
 

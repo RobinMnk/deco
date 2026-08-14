@@ -5,14 +5,8 @@
 #ifndef RCUT_PARTITION_H
 #define RCUT_PARTITION_H
 
-#include <memory>
-
 #include "graph.h"
 //#include "../utils/skiplist.h"
-
-
-template<typename Graph>
-class DFS;
 
 
 struct SweepCut {
@@ -22,10 +16,10 @@ struct SweepCut {
 
 
 /// Represents a Partition of a Graph, i.e., a decomposition of the graph into Clusters.
-template<typename Graph>
+template<GraphLike Graph>
 class Partition {
 public:
-    using EdgeWeight = Graph::EdgeWeight;
+    using EdgeWeight = typename Graph::EdgeWeight;
 
     /// Contains the information of a node within its cluster. All values are restricted to be within the same cluster, no self-loops.
     struct ClusterVertex {
@@ -72,6 +66,24 @@ public:
 
 
 private:
+    class DFS {
+        std::vector<NodeIx> m_visited;
+        std::vector<NodeIx> m_labels;
+        std::vector<NodeIx> m_stack;
+        NodeIx numCalls{0};
+        const Partition* partition;
+
+    public:
+        DFS(const Partition* part, NodeIx n) : m_visited(n), m_labels(n), m_stack(n), partition{part} {}
+
+        NodeIx computeLabels(const Cluster& cluster);
+
+        [[nodiscard]]
+        const std::vector<NodeIx>& labels() const {
+            return m_labels;
+        }
+    };
+
     // guarantees that the index of any Cluster never changes (i.e., no deletions)
     std::vector<Cluster> clusters;
     std::vector<ClusterVertex> clusterVertices;
@@ -81,13 +93,13 @@ private:
     std::vector<EdgeIx> sc_removeAt; // tracks number of edges ending at given node, used in sweepCut procedure.
     EdgeIx numCutEdges;
     EdgeWeight cutSize;
-    std::unique_ptr<DFS<Graph>> dfs;
+    DFS dfs;
     Graph* graph;
 
 public:
 //    SkipList sl;
 
-    explicit Partition(Graph* gr);
+    explicit Partition(Graph& gr);
 
     /// splits Cluster with given id into its connected components and adds resulting clusters to partition and their id to given list
     void consolidate(NodeIx clusterId, std::vector<NodeIx>& modified);
@@ -157,44 +169,45 @@ public:
 }; // class Partition
 
 
-template<typename Graph>
-using Cluster = Partition<typename Graph::EdgeWeight>::Cluster;
+template<GraphLike Graph>
+using Cluster = typename Partition<Graph>::Cluster;
 
-template<typename Graph>
-using ClusterVertex = Partition<typename Graph::EdgeWeight>::ClusterVertex;
+template<GraphLike Graph>
+using ClusterVertex = typename Partition<Graph>::ClusterVertex;
 
-template<typename Graph>
-Partition<Graph>::Partition(Graph* gr) :
+template<GraphLike Graph>
+Partition<Graph>::Partition(Graph& gr) :
         clusters(1),
-        clusterVertices(gr->numNodes),
-        splitOracle(gr->numNodes),
-        lookup(gr->numNodes),
-        sc_seen(gr->numNodes),
-        sc_removeAt(gr->numNodes),
+        clusterVertices(gr.numNodes),
+        splitOracle(gr.numNodes),
+        lookup(gr.numNodes),
+        sc_seen(gr.numNodes),
+        sc_removeAt(gr.numNodes),
         numCutEdges{0},
         cutSize{0},
-        dfs(this, gr->numNodes),
-        graph{gr}
+        dfs(this, gr.numNodes),
+        graph{&gr}
 //        sl(2 * gr.numEdges)
 {
-    EdgeIx volume{0};
+    EdgeWeight volume{0};
 
-    for(NodeIx nix = 0; nix < gr->numNodes; ++nix) {
-        EdgeIx degree = gr->ranges[nix+1] - gr->ranges[nix];
+    for(NodeIx nix = 0; nix < gr.numNodes; ++nix) {
+        EdgeIx end = gr.ranges[nix+1];
+        auto degree = static_cast<EdgeWeight>(end - gr.ranges[nix]);
         clusterVertices[nix] = {
-            nix, gr->ranges[nix+1], degree
+            nix, end, degree
     };
-        volume += gr->ranges[nix+1] - gr->ranges[nix];
+        volume += degree;
         lookup[nix] = nix;
     }
 
-    clusters[0] = {volume, volume, 0, gr->numNodes, this};
+    clusters[0] = {volume, volume, 0, gr.numNodes, this};
 
     std::vector<NodeIx> mod; // a bit ugly
     // consolidate(0, mod);
 }
 
-template<typename Graph>
+template<GraphLike Graph>
 void Partition<Graph>::consolidate(NodeIx clusterId, std::vector<NodeIx>& modified) {
     NodeIx subclusters = dfs.computeLabels(clusters[clusterId]);
     if(subclusters > 1) {
@@ -203,7 +216,7 @@ void Partition<Graph>::consolidate(NodeIx clusterId, std::vector<NodeIx>& modifi
     }
 }
 
-template<typename Graph>
+template<GraphLike Graph>
 template<typename T>
 void Partition<Graph>::sortCluster(const Cluster &cluster, const T& values)  {
     // stable sort is actually preferred over regular sort to avoid unnecessary jumps in iterations later
@@ -215,7 +228,7 @@ void Partition<Graph>::sortCluster(const Cluster &cluster, const T& values)  {
     }
 }
 
-template<typename Graph>
+template<GraphLike Graph>
 template<bool requiresSort, bool consolidatePieces, typename T>
 EdgeIx Partition<Graph>::splitByIndices(NodeIx clusterId, const T& values, NodeIx numParts, std::vector<NodeIx>& modified) {
     Cluster& current = clusters[clusterId];
@@ -280,7 +293,7 @@ EdgeIx Partition<Graph>::splitByIndices(NodeIx clusterId, const T& values, NodeI
     return extraCutEdges;
 }
 
-template<typename Graph>
+template<GraphLike Graph>
 template<bool requiresSort, bool consolidatePieces>
 void Partition<Graph>::split(NodeIx clusterId, NodeIx offset, std::vector<NodeIx>& modified) {
     // prepare splitOracle to contain 0 for every node on one side and 1 for every node on the other side of the cut
@@ -293,7 +306,7 @@ void Partition<Graph>::split(NodeIx clusterId, NodeIx offset, std::vector<NodeIx
     splitByIndices<requiresSort, consolidatePieces>(clusterId, splitOracle, 2, modified);
 }
 
-template<typename Graph>
+template<GraphLike Graph>
 template<typename T>
 SweepCut Partition<Graph>::sweepCut(NodeIx clusterId, const T& values) {
     const Cluster& current = clusters[clusterId];
@@ -342,34 +355,14 @@ SweepCut Partition<Graph>::sweepCut(NodeIx clusterId, const T& values) {
     return {bestCut.sparsity, bestCut.offset};
 }
 
-
-template<typename Graph>
-class DFS {
-    std::vector<NodeIx> m_visited;
-    std::vector<NodeIx> m_labels;
-    std::vector<NodeIx> m_stack;
-    NodeIx numCalls{0};
-    const Partition<Graph>* partition;
-
-public:
-    DFS(const Partition<Graph>* part, NodeIx n) : m_visited(n), m_labels(n), m_stack(n), partition{part} {}
-
-    NodeIx computeLabels(const Cluster<Graph>& cluster);
-
-    [[nodiscard]]
-    const std::vector<NodeIx>& labels() const {
-        return m_labels;
-    }
-};
-
-template<typename Graph>
-NodeIx DFS<Graph>::computeLabels(const Cluster<Graph>& cluster) {
+template<GraphLike Graph>
+NodeIx Partition<Graph>::DFS::computeLabels(const Cluster& cluster) {
     NodeIx numComponents = 0;
     NodeIx qix = 0;
 
     numCalls++;
 
-    for (const ClusterVertex<Graph>& cv: cluster) {
+    for (const ClusterVertex& cv: cluster) {
         if (m_visited[cv.nix] == numCalls) {
             continue;
         }
@@ -378,10 +371,9 @@ NodeIx DFS<Graph>::computeLabels(const Cluster<Graph>& cluster) {
         m_visited[cv.nix] = numCalls;
         m_labels[cv.nix] = numComponents;
 
-        // Run DFS starting from cv.nix
         while (qix) {
             NodeIx u = m_stack[--qix];
-            const ClusterVertex<Graph>& cvx = partition->vertexFor(u);
+            const ClusterVertex& cvx = partition->vertexFor(u);
 
             for (auto it = cluster.edgeBegin(cvx); it != cluster.edgeEnd(cvx); ++it) {
                 NodeIx nb = *it;
@@ -399,7 +391,6 @@ NodeIx DFS<Graph>::computeLabels(const Cluster<Graph>& cluster) {
 
     return numComponents;
 }
-
 
 template<typename Graph>
 void checkCluster(const Cluster<Graph>& cluster, const Graph& graph) {

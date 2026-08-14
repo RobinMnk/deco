@@ -48,11 +48,15 @@ void checkBuildMode() {
 //     std::cout << "\n=============================\n -> " << maxVal << "\n -> " << minVal << std::endl;
 // }
 
-template <typename Graph>
-void run(Graph& G) {
+template<GraphLike GraphT>
+void run(GraphT& G) {
     int x = G.numNodes;
+    Partition<GraphT> decomposition{G};
 
-    auto partition = Partition<Graph>(G);
+}
+
+void test(GraphLike auto& G) {
+    Partition<decltype(G)> decomposition{G};
 }
 
 int main(int argc, char* argv[]) {
@@ -62,7 +66,7 @@ int main(int argc, char* argv[]) {
 
     auto G = load_mtx_dynamic(filename);
 
-    std::visit([](const auto& graph) {
+    std::visit([](auto& graph) {
         run(graph);
     }, G);
 
