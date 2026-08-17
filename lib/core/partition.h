@@ -16,7 +16,7 @@ struct SweepCut {
 
 
 /// Represents a Partition of a Graph, i.e., a decomposition of the graph into Clusters.
-template<GraphLike Graph>
+template<MutableGraph Graph>
 class Partition {
 public:
     using EdgeWeight = typename Graph::EdgeWeight;
@@ -49,6 +49,11 @@ public:
         [[nodiscard]]
         std::vector<ClusterVertex>::iterator end() const {
             return partition->clusterVertices.begin() + nodeEnd;
+        }
+
+        [[nodiscard]]
+        EdgeIx edgeBeginIndex(const ClusterVertex& cv) const {
+            return partition->graph->startIndex(cv.nix);
         }
 
         [[nodiscard]]
@@ -169,13 +174,13 @@ public:
 }; // class Partition
 
 
-template<GraphLike Graph>
+template<MutableGraph Graph>
 using Cluster = typename Partition<Graph>::Cluster;
 
-template<GraphLike Graph>
+template<MutableGraph Graph>
 using ClusterVertex = typename Partition<Graph>::ClusterVertex;
 
-template<GraphLike Graph>
+template<MutableGraph Graph>
 Partition<Graph>::Partition(Graph& gr) :
         clusters(1),
         clusterVertices(gr.numNodes),
@@ -207,7 +212,7 @@ Partition<Graph>::Partition(Graph& gr) :
     // consolidate(0, mod);
 }
 
-template<GraphLike Graph>
+template<MutableGraph Graph>
 void Partition<Graph>::consolidate(NodeIx clusterId, std::vector<NodeIx>& modified) {
     NodeIx subclusters = dfs.computeLabels(clusters[clusterId]);
     if(subclusters > 1) {
@@ -216,7 +221,7 @@ void Partition<Graph>::consolidate(NodeIx clusterId, std::vector<NodeIx>& modifi
     }
 }
 
-template<GraphLike Graph>
+template<MutableGraph Graph>
 template<typename T>
 void Partition<Graph>::sortCluster(const Cluster &cluster, const T& values)  {
     // stable sort is actually preferred over regular sort to avoid unnecessary jumps in iterations later
@@ -228,39 +233,50 @@ void Partition<Graph>::sortCluster(const Cluster &cluster, const T& values)  {
     }
 }
 
-template<GraphLike Graph>
+template<MutableGraph Graph>
 template<bool requiresSort, bool consolidatePieces, typename T>
 EdgeIx Partition<Graph>::splitByIndices(NodeIx clusterId, const T& values, NodeIx numParts, std::vector<NodeIx>& modified) {
     Cluster& current = clusters[clusterId];
-    std::vector<Cluster> others(numParts, {0, 0, 0, 0, this });
+    std::vector<Cluster> others(numParts, {0, 0, 0, 0, this});
     std::vector<NodeIx> counts(numParts);
     EdgeIx extraCutEdges = 0;
+    EdgeWeight extraCutWeight{0};
 
     for(ClusterVertex& cv: current) {
-        counts[values[cv.nix]]++;
-        others[values[cv.nix]].volume += graph->degree(cv.nix);
-        auto eit = current.edgeBegin(cv);
-        while(eit != current.edgeEnd(cv)) {
-            NodeIx nb = *eit;
-//            EdgeWeight wgt = fullGraph. ;; //
+        const NodeIx index = values[cv.nix];
+        ++counts[index];
+        others[index].volume += graph->weightedDegree(cv.nix);
+
+        for (EdgeIx eix = current.edgeBeginIndex(cv); eix < cv.end; /*no increment of eix*/) {
+            NodeIx nb = graph->edges[eix];
+            EdgeWeight wgt = graph->edgeWeight(eix);
 
             // check if the neighbor is in some other cluster
-            if (values[cv.nix] != values[nb]) {
+            if (index != values[nb]) {
                 // deactivate edge from cv.nix -> nb
-                cv.internalDegree--;
-                cv.end--;
+                cv.internalDegree -= wgt;
+                --cv.end;
 //                sl.del(cv.end);
-                std::iter_swap(eit, current.edgeEnd(cv)); // WARN: this modifies the graph!
+
+                graph->swapEdges(eix, cv.end);       // WARN: this modifies the graph (not semantically)!
+
                 extraCutEdges++;  // counts every edge twice
-                continue; // do not increment eit, due to swap
+                extraCutWeight += wgt;
+                continue; // do not increment eix, due to swap
             } else {
-                others[values[cv.nix]].internalVolume++;
+                others[index].internalVolume += wgt;
+                ++eix;
             }
-            ++eit;
         }
     }
-    extraCutEdges /= 2; // every edge was counted twice
+
+    // every edge was counted twice
+    extraCutEdges /= 2;
+    extraCutWeight /= 2;
+
     numCutEdges += extraCutEdges;
+    cutSize += extraCutWeight;
+
     if constexpr (requiresSort)
         sortCluster(current, values);
 
@@ -293,7 +309,7 @@ EdgeIx Partition<Graph>::splitByIndices(NodeIx clusterId, const T& values, NodeI
     return extraCutEdges;
 }
 
-template<GraphLike Graph>
+template<MutableGraph Graph>
 template<bool requiresSort, bool consolidatePieces>
 void Partition<Graph>::split(NodeIx clusterId, NodeIx offset, std::vector<NodeIx>& modified) {
     // prepare splitOracle to contain 0 for every node on one side and 1 for every node on the other side of the cut
@@ -306,13 +322,13 @@ void Partition<Graph>::split(NodeIx clusterId, NodeIx offset, std::vector<NodeIx
     splitByIndices<requiresSort, consolidatePieces>(clusterId, splitOracle, 2, modified);
 }
 
-template<GraphLike Graph>
+template<MutableGraph Graph>
 template<typename T>
 SweepCut Partition<Graph>::sweepCut(NodeIx clusterId, const T& values) {
     const Cluster& current = clusters[clusterId];
 
-    EdgeIx cutEdges = 0;
-    EdgeIx cutVolume = 0;
+    EdgeWeight cutEdges = 0;
+    EdgeWeight cutVolume = 0;
     NodeIx offset = 0;
 
     SweepCut bestCut{1000, 0 };
@@ -322,40 +338,58 @@ SweepCut Partition<Graph>::sweepCut(NodeIx clusterId, const T& values) {
     for(const ClusterVertex& cv: current) {
         cutVolume += cv.internalDegree; // graph->degree(cv.nix);
 
-        for(auto it = current.edgeBegin(cv); it != current.edgeEnd(cv); ++it) {
-            NodeIx nb = *it;
-            // branchless check if edge goes across cut
-            cutEdges += 1 - sc_seen[nb];
-            sc_removeAt[nb] += 1 - sc_seen[nb];
+        for (EdgeIx eix = current.edgeBeginIndex(cv); eix < cv.end; ++eix) {
+            NodeIx nb = graph->edges[eix];
+            EdgeWeight wgt = graph->edgeWeight(eix);
+
+            // sc_seen[nb] is either 0 or 1
+            cutEdges += wgt * (1 - sc_seen[nb]);
+            sc_removeAt[nb] += wgt * (1 - sc_seen[nb]);
 
 //            Equivalent to this:
 //            if(!sc_seen[nb]) {
-//                cutEdges += 1;
-//                sc_removeAt[nb]++;
+//                cutEdges += wgt;
+//                sc_removeAt[nb] += wgt;
 //            }
         }
-        cutEdges -= sc_removeAt[cv.nix]; // edge ends at nix, it no longer crosses the cut
-        sc_removeAt[cv.nix] = 0;
 
-        if(cutVolume == current.internalVolume) break;
+//         for(auto it = current.edgeBegin(cv); it != current.edgeEnd(cv); ++it) {
+//             NodeIx nb = *it;
+//             // branchless check if edge goes across cut
+//             cutEdges += 1 - sc_seen[nb];
+//             sc_removeAt[nb] += 1 - sc_seen[nb];
+//
+// //            Equivalent to this:
+// //            if(!sc_seen[nb]) {
+// //                cutEdges += 1;
+// //                sc_removeAt[nb]++;
+// //            }
+//         }
+
+        cutEdges -= sc_removeAt[cv.nix]; // edge ends at nix, it no longer crosses the cut
+        sc_removeAt[cv.nix] = 0; // reset for next call
+
+        // cut contains entire cluster -> no more cut, break (and account for numerical imprecision)
+        if(cutVolume >= current.internalVolume - 1e-8) break;
 
         frac_t denom = static_cast<frac_t>(std::min(cutVolume, current.internalVolume - cutVolume));
-
         frac_t sparsity = static_cast<frac_t>(cutEdges) / denom;
 
         if(sparsity < bestCut.sparsity) {
             bestCut = { sparsity, offset };
         }
+
         offset++;
         sc_seen[cv.nix] = 1;
     }
 
+    // reset for next call
     for(const ClusterVertex& cv: current) sc_seen[cv.nix] = 0;
 
     return {bestCut.sparsity, bestCut.offset};
 }
 
-template<GraphLike Graph>
+template<MutableGraph Graph>
 NodeIx Partition<Graph>::DFS::computeLabels(const Cluster& cluster) {
     NodeIx numComponents = 0;
     NodeIx qix = 0;
