@@ -5,6 +5,8 @@
 #ifndef RCUT_PARTITION_H
 #define RCUT_PARTITION_H
 
+#include <ranges>
+
 #include "graph.h"
 //#include "../utils/skiplist.h"
 
@@ -64,6 +66,11 @@ public:
         [[nodiscard]]
         std::vector<NodeIx>::iterator edgeEnd(const ClusterVertex& cv) const {
             return partition->graph->edges.begin() + cv.end;
+        }
+
+        [[nodiscard]]
+        auto internalEdgeIndices(const ClusterVertex& cv) const {
+            return std::views::iota(edgeBeginIndex(cv), cv.end);
         }
 
         bool operator==(const Cluster& other) const = default;
@@ -198,12 +205,12 @@ Partition<Graph>::Partition(Graph& gr) :
 
     for(NodeIx nix = 0; nix < gr.numNodes; ++nix) {
         EdgeIx end = gr.ranges[nix+1];
-        auto degree = static_cast<EdgeWeight>(end - gr.ranges[nix]);
+        EdgeWeight degree = gr.weightedDegree(nix);
         clusterVertices[nix] = {
             nix, end, degree
-    };
-        volume += degree;
+        };
         lookup[nix] = nix;
+        volume += degree;
     }
 
     clusters[0] = {volume, volume, 0, gr.numNodes, this};
@@ -338,7 +345,7 @@ SweepCut Partition<Graph>::sweepCut(NodeIx clusterId, const T& values) {
     for(const ClusterVertex& cv: current) {
         cutVolume += cv.internalDegree; // graph->degree(cv.nix);
 
-        for (EdgeIx eix = current.edgeBeginIndex(cv); eix < cv.end; ++eix) {
+        for (EdgeIx eix: current.internalEdgeIndices(cv)) {
             NodeIx nb = graph->edges[eix];
             EdgeWeight wgt = graph->edgeWeight(eix);
 

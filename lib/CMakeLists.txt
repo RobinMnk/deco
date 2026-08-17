@@ -1,5 +1,4 @@
 add_library(DecoLib STATIC
-        ${PROJECT_SOURCE_DIR}/src/algorithms/expander_decomposition/random_walk.cpp
         ${PROJECT_SOURCE_DIR}/src/algorithms/tree_cut_sparsifier/expander_hierarchy.cpp
         ${PROJECT_SOURCE_DIR}/src/algorithms/applications/normalized_cut.cpp
 )

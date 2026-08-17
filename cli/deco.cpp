@@ -1,15 +1,11 @@
-// #include "algorithms/expander_decomposition/cpu.h"
-// #include "algorithms/applications/normalized_cut.h"
-#include "core/partition.h"
-#include "utils/graph_io.h"
-#include "utils/timer.h"
 
 #ifdef DECO_ENABLE_CUDA
 #include "algorithms/expander_decomposition/cuda.h"
 #endif
 
-// #include "algorithms/expander_decomposition/random_walk.h"
-// #include "algorithms/tree_cut_sparsifier_evaluation/evaluator.h"
+#include "algorithms/expander_decomposition/cpu.h"
+#include "utils/graph_io.h"
+#include "utils/timer.h"
 
 void checkBuildMode() {
     #ifdef NDEBUG
@@ -48,15 +44,19 @@ void checkBuildMode() {
 //     std::cout << "\n=============================\n -> " << maxVal << "\n -> " << minVal << std::endl;
 // }
 
-template<GraphLike GraphT>
+template<MutableGraph GraphT>
 void run(GraphT& G) {
     int x = G.numNodes;
     Partition<GraphT> decomposition{G};
 
+
+    auto expDec = expander_decomposition::compute(G);
+
 }
 
-void test(GraphLike auto& G) {
-    Partition<decltype(G)> decomposition{G};
+void test(MutableGraph auto& G) {
+    using GraphT = std::remove_reference_t<decltype(G)>;
+    Partition<GraphT> decomposition{G};
 }
 
 int main(int argc, char* argv[]) {
