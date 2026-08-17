@@ -8,121 +8,128 @@
 #include "config.h"
 #include "core/partition.h"
 #include "random_walk.h"
+
 #include <numeric>
-
 #include <bit>
-#include <cstdint>
 
-inline double fast_approx_sqrt(int64_t val) {
-    if (val <= 1) return 1.0;
-    int msb = std::bit_width(static_cast<uint64_t>(val)) - 1;
-    return static_cast<double>(1ULL << (msb / 2));
-}
 
-inline bool isConverged(const Cluster& cluster, double potential, const Config& config) {
-    return potential <= config.randomWalkThreshold * std::max(std::bit_width(cluster.internalVolume), 1);
-}
+namespace expander_decomposition {
 
-inline bool isSparse(const Cluster& cluster, double sparsity, const Config& config) {
-    return sparsity < config.targetSparsity * std::max(std::bit_width(cluster.internalVolume), 1);
-}
-
-template<Strategy strategy = {}>
-Partition expanderDecomposition(Graph& graph, const Config& config = {}) {
-    RandomWalk walk{graph};
-    Partition decomposition{&graph};
-
-    std::vector<NodeIx> active, next(decomposition.numClusters());
-    std::iota(next.begin(), next.end(), 0);
-
-    // Graph consists of multiple connected components -> reset random walk in each
-    if(decomposition.numClusters() > 1) {
-        for(const Cluster& cl: decomposition)
-            walk.recenterCluster(cl);
+    inline double fast_approx_sqrt(int64_t val) {
+        if (val <= 1) return 1.0;
+        int msb = std::bit_width(static_cast<uint64_t>(val)) - 1;
+        return static_cast<double>(1ULL << (msb / 2));
     }
 
-    size_t numSteps = config.initialNumSteps;
+    template<MutableGraph GraphT>
+    bool isConverged(const Cluster<GraphT>& cluster, double potential, const Config& config) {
+        return potential <= 1e-4; // config.randomWalkThreshold * std::max(std::bit_width(cluster.internalVolume), 1);
+    }
 
-    while(!next.empty()) {
-        std::swap(active, next);
-        next.clear(); // can be replaced by custom queue with lazy delete
+    template<MutableGraph GraphT>
+    bool isSparse(const Cluster<GraphT>& cluster, double sparsity, const Config& config) {
+        return sparsity < 0.3; // config.targetSparsity * std::max(std::bit_width(cluster.internalVolume), 1);
+    }
 
-        size_t rw = numSteps;
-        while (rw--) walk.iterate(decomposition, active);
-        auto& values = walk.values();
 
-        while(!active.empty()) {
-            NodeIx clusterId = active.back();
-            active.pop_back();
+    template<Strategy strategy = {}, MutableGraph Graph>
+    Partition<Graph> compute(Graph& graph, const Config& config = {}) {
+        RandomWalk walk{graph};
+        Partition decomposition{graph};
 
-            const Cluster& current = decomposition.getCluster(clusterId);
+        std::vector<NodeIx> active, next(decomposition.numClusters());
+        std::iota(next.begin(), next.end(), 0);
 
-            if(std::abs(walk.averageOf(current)) > config.randomWalkThreshold) {
-                WARN("\nCLUSTER CAN NEVER CONVERGE!!!\n");
-            }
+        // Graph consists of multiple connected components -> reset random walk in each
+        if(decomposition.numClusters() > 1) {
+            for(const Cluster<Graph>& cl: decomposition)
+                walk.recenterCluster(cl);
+        }
 
-            LOG("  working on cluster " << clusterId << "\t (" << current.size() << " nodes, potential: " << walk.potential(current) << ")");
+        size_t numSteps = config.initialNumSteps;
 
-            if constexpr (!strategy.cutWhenConverged) {
-                //if(walk.potential(current) < config.randomWalkThreshold) {
-                if (isConverged(current, walk.potential(current), config)) {
-                    LOG("       -> potential sufficiently low -> certified expander");
-                    continue;
+        while(!next.empty()) {
+            std::swap(active, next);
+            next.clear(); // can be replaced by custom queue with lazy delete
+
+            size_t rw = numSteps;
+            while (rw--) walk.iterate(decomposition, active);
+            auto& values = walk.values();
+
+            while(!active.empty()) {
+                NodeIx clusterId = active.back();
+                active.pop_back();
+
+                const Cluster<Graph>& current = decomposition.getCluster(clusterId);
+
+                if(std::abs(walk.averageOf(current)) > config.randomWalkThreshold) {
+                    WARN("\nCLUSTER CAN NEVER CONVERGE!!!\n");
                 }
-            }
 
-            auto sweepCut = decomposition.sweepCut(clusterId, values);
+                LOG("  working on cluster " << clusterId << "\t (" << current.size() << " nodes, potential: " << walk.potential(current) << ")");
 
-            LOG("     Sweep cut:   sparsity=" << sweepCut.sparsity << ", offset=" << sweepCut.offset);
+                if constexpr (!strategy.cutWhenConverged) {
+                    if(walk.potential(current) < config.randomWalkThreshold) {
+                    // if (isConverged(current, walk.potential(current), config)) {
+                        LOG("       -> potential sufficiently low -> certified expander");
+                        continue;
+                    }
+                }
 
-            if(isSparse(current, sweepCut.sparsity, config)) {
-                LOG("       -> considered sparse -> cutting");
-                std::vector<NodeIx> modified{clusterId};
-                decomposition.split<false>(clusterId, sweepCut.offset, modified);
+                auto sweepCut = decomposition.sweepCut(clusterId, values);
 
-                numSteps = config.mainNumSteps;
+                LOG("     Sweep cut:   sparsity=" << sweepCut.sparsity << ", offset=" << sweepCut.offset);
 
-                for (NodeIx clx: modified) {
-                    const Cluster &cl = decomposition.getCluster(clx);
-                    if (cl.size() < 2 || cl.internalVolume == 0) continue;
-                    frac_t potential;
-                    if constexpr (strategy.crs == Strategy::RECENTER)  potential = walk.recenterCluster(cl);
-                    if constexpr (strategy.crs == Strategy::RESET)     potential = walk.resetCluster(cl);
+                // if(isSparse(current, sweepCut.sparsity, config)) {
+                if(sweepCut.sparsity < config.targetSparsity) {
+                    LOG("       -> considered sparse -> cutting");
+                    std::vector<NodeIx> modified{clusterId};
+                    decomposition.template split<false>(clusterId, sweepCut.offset, modified);
 
-                    if constexpr (strategy.cutWhenConverged) {
-                        if constexpr (strategy.cs == Strategy::CASCADE) {
-                            // cascade sweep cuts by adding cluster clx to active
-                            active.push_back(clx);
-                        } else if constexpr (strategy.cs == Strategy::ITERATE) {
-                            // add clx directly to the next round, sweep cut will be considered after another step of the random walk
-                            next.push_back(clx);
-                        }
-                    } else {
-                        // if strategy.cutWhenConverged is set to false, we only consider cluster clx if its potential is above the threshold
-                        if (potential > config.randomWalkThreshold) {
+                    numSteps = config.mainNumSteps;
+
+                    for (NodeIx clx: modified) {
+                        const Cluster<Graph> &cl = decomposition.getCluster(clx);
+                        if (cl.size() < 2 || cl.internalVolume == 0) continue;
+                        frac_t potential;
+                        if constexpr (strategy.crs == Strategy::RECENTER)  potential = walk.recenterCluster(cl);
+                        if constexpr (strategy.crs == Strategy::RESET)     potential = walk.resetCluster(cl);
+
+                        if constexpr (strategy.cutWhenConverged) {
                             if constexpr (strategy.cs == Strategy::CASCADE) {
+                                // cascade sweep cuts by adding cluster clx to active
                                 active.push_back(clx);
                             } else if constexpr (strategy.cs == Strategy::ITERATE) {
+                                // add clx directly to the next round, sweep cut will be considered after another step of the random walk
                                 next.push_back(clx);
+                            }
+                        } else {
+                            // if strategy.cutWhenConverged is set to false, we only consider cluster clx if its potential is above the threshold
+                            if (potential > config.randomWalkThreshold) {
+                                if constexpr (strategy.cs == Strategy::CASCADE) {
+                                    active.push_back(clx);
+                                } else if constexpr (strategy.cs == Strategy::ITERATE) {
+                                    next.push_back(clx);
+                                }
                             }
                         }
                     }
-                }
-            } else {
-                if constexpr (strategy.cutWhenConverged) {
-                    if(!isConverged(current, walk.potential(current), config)) {
-                        next.push_back(clusterId);
-                    } else {
-                        LOG("       -> potential sufficiently low -> certified expander");
-                    }
                 } else {
-                    next.push_back(clusterId);
+                    if constexpr (strategy.cutWhenConverged) {
+                        if(!isConverged(current, walk.potential(current), config)) {
+                            next.push_back(clusterId);
+                        } else {
+                            LOG("       -> potential sufficiently low -> certified expander");
+                        }
+                    } else {
+                        next.push_back(clusterId);
+                    }
                 }
             }
         }
-    }
 
-    return decomposition;
+        return decomposition;
+    }
 }
 
 #endif //RCUT_EXPANDER_DECOMPOSITION_CPU_H

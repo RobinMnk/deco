@@ -39,17 +39,34 @@ struct Unweighted {
     constexpr void push_back(weight_type = 1) noexcept {}
     constexpr void pop_back() noexcept {}
     constexpr void reserve(EdgeIx) noexcept {}
+    constexpr void swap(EdgeIx, EdgeIx) noexcept {}
 };
 
 template <typename T>
 class Weighted {
+    template <typename>
+    friend class CsrGraph;
+
     std::vector<T> weights_;
+    std::vector<T> degrees_;
+
+    void computeDegrees(std::span<const EdgeIx> ranges) {
+        degrees_.assign(ranges.size() - 1, T{});
+        for (NodeIx node = 0; node + 1 < ranges.size(); ++node) {
+            T degree{};
+            for (EdgeIx eix = ranges[node]; eix < ranges[node + 1]; ++eix) {
+                degree += weights_[eix];
+            }
+            degrees_[node] = degree;
+        }
+    }
 public:
     using weight_type = T;
 
     Weighted() = default;
     explicit Weighted(EdgeIx numEdges) : weights_(numEdges, T{1}) {}
     explicit Weighted(std::vector<T>&& weights) : weights_(std::move(weights)) {}
+
 
     [[nodiscard]]
     const T& operator[](EdgeIx e) const noexcept {
@@ -75,6 +92,15 @@ public:
 
     void reserve(EdgeIx count) {
         weights_.reserve(count);
+    }
+
+    void swap(EdgeIx a, EdgeIx b) {
+        std::swap(weights_[a], weights_[b]);
+    }
+
+    [[nodiscard]]
+    const T& weightedDegree(NodeIx node) const noexcept {
+        return degrees_[node];
     }
 };
 
@@ -117,11 +143,15 @@ public:
 
     CsrGraph(NodeIx n, EdgeIx m, std::vector<NodeIx>&& ed, std::vector<EdgeIx>&& rg) :
         numNodes{n}, numEdges{m}, edges(std::move(ed)), ranges(std::move(rg)), weights(2 * m) {
+        if constexpr (!std::same_as<Policy, Unweighted>) {
+            weights.computeDegrees(ranges);
+        }
     }
 
     CsrGraph(NodeIx n, EdgeIx m, std::vector<NodeIx>&& ed, std::vector<EdgeIx>&& rg, std::vector<EdgeWeight>&& wgt)
         requires (!std::same_as<Policy, Unweighted>) :
         numNodes{n}, numEdges{m}, edges(std::move(ed)), ranges(std::move(rg)), weights(std::move(wgt)) {
+        weights.computeDegrees(ranges);
     }
 
     // Forbid Copying
@@ -183,6 +213,20 @@ public:
     EdgeWeight edgeWeight(EdgeIx edge) const noexcept {
         return weights[edge];
     }
+
+    [[nodiscard]]
+    EdgeWeight weightedDegree(NodeIx node) const noexcept {
+        if constexpr (std::same_as<Policy, Unweighted>) {
+            return degree(node);
+        } else {
+            return weights.weightedDegree(node);
+        }
+    }
+
+    void swapEdges(EdgeIx a, EdgeIx b) {
+        std::swap(edges[a], edges[b]);
+        weights.swap(a, b);
+    }
 };
 
 template<typename G>
@@ -204,8 +248,15 @@ concept GraphLike = requires(G& g, const G& cg, NodeIx node, EdgeIx eix) {
     { cg.nend(node) };
 
     { cg.degree(node) } -> std::same_as<EdgeIx>;
+    { cg.weightedDegree(node) } -> std::convertible_to<typename G::EdgeWeight>;
     { cg.edgeWeight(eix) } -> std::convertible_to<typename G::EdgeWeight>;
 };
+
+template<typename G>
+concept MutableGraph =
+    GraphLike<G> && requires(G& g, EdgeIx a, EdgeIx b) {
+        { g.swapEdges(a, b) } -> std::same_as<void>;
+    };
 
 
 template <typename Spec = Unweighted>
