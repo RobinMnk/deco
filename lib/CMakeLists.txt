@@ -1,8 +1,6 @@
 add_library(DecoLib STATIC
-        ${PROJECT_SOURCE_DIR}/src/algorithms/tree_cut_sparsifier/expander_hierarchy.cpp
         ${PROJECT_SOURCE_DIR}/src/algorithms/applications/normalized_cut.cpp
 )
-
 target_include_directories(DecoLib PUBLIC ${PROJECT_SOURCE_DIR})
 target_include_directories(DecoLib PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 

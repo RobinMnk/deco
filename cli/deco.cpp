@@ -1,4 +1,5 @@
 
+#include "algorithms/tree_cut_sparsifier/expander_hierarchy.h"
 #ifdef DECO_ENABLE_CUDA
 #include "algorithms/expander_decomposition/cuda.h"
 #endif
@@ -46,12 +47,12 @@ void checkBuildMode() {
 
 template<MutableGraph GraphT>
 void run(GraphT& G) {
-    int x = G.numNodes;
-    Partition<GraphT> decomposition{G};
-
-
+    Timer t;
+    t.start();
     auto expDec = expander_decomposition::compute(G);
+    auto millis = t.timeMillis();
 
+    printf("time: %lld\nnumClusters: %d\ncutEdges: %d\ncutWeight: %d\nnodes: %d\nedges: %d\n", millis, expDec.numClusters(), expDec.getNumCutEdges(), expDec.getCutSize(), G.numNodes, G.numEdges);
 }
 
 void test(MutableGraph auto& G) {
@@ -73,6 +74,7 @@ int main(int argc, char* argv[]) {
 
     // ExpanderHierarchy eh{&G};
     // eh.build();
+
     //
     // NormalizedCut nc{&eh};
     //

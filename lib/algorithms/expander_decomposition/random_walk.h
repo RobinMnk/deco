@@ -9,7 +9,8 @@
 #include <valarray>
 #include <random>
 
-inline std::mt19937 random_source{std::random_device{}()};
+inline thread_local std::mt19937 random_source{1};
+
 
 // // const frac_t rw_stay = 0.1;
 // extern std::mt19937 random_source;

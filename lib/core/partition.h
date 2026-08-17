@@ -108,6 +108,8 @@ private:
     DFS dfs;
     Graph* graph;
 
+    // TODO: move scratch memory to PartitionBuilder
+
 public:
 //    SkipList sl;
 

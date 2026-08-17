@@ -63,6 +63,7 @@ namespace expander_decomposition {
                 const Cluster<Graph>& current = decomposition.getCluster(clusterId);
 
                 if(std::abs(walk.averageOf(current)) > config.randomWalkThreshold) {
+                    std::cout << "Cluster average: " << std::abs(walk.averageOf(current)) << std::endl;
                     WARN("\nCLUSTER CAN NEVER CONVERGE!!!\n");
                 }
 

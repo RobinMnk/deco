@@ -8,41 +8,136 @@
 #include "algorithms/expander_decomposition/cpu.h"
 #include "utils/timer.h"
 
+#include <algorithm>
 #include <cmath>
 #include <limits>
 #include <numeric>
+#include <span>
 #include <stdexcept>
+#include <tuple>
+#include <type_traits>
+#include <utility>
+#include <vector>
 
-template<MutableGraph Graph>
+template<GraphLike Graph>
+CsrGraph<typename Graph::EdgeWeight> contractGraph(const Graph& graph, NodeIx numClusters, const std::vector<NodeIx>& parents) {
+    using EdgeWeight = typename Graph::EdgeWeight;
+
+    struct ContractedEdge {
+        NodeIx fx;
+        NodeIx tx;
+        EdgeWeight weight;
+    };
+
+    std::vector<ContractedEdge> edges;
+    edges.reserve(graph.numEdges);
+
+    for (NodeIx u = 0; u < graph.numNodes; ++u) {
+        const NodeIx cu = parents[u];
+        for (EdgeIx eix = graph.startIndex(u); eix < graph.endIndex(u); ++eix) {
+            const NodeIx v = graph.edges[eix];
+            if (u > v) continue;
+
+            const NodeIx cv = parents[v];
+            if (cu == cv) continue;
+
+            edges.push_back({
+                std::min(cu, cv),
+                std::max(cu, cv),
+                graph.edgeWeight(eix)
+            });
+        }
+    }
+
+    std::sort(edges.begin(), edges.end(), [](const ContractedEdge& a, const ContractedEdge& b) {
+        return std::tie(a.fx, a.tx) < std::tie(b.fx, b.tx);
+    });
+
+    DynamicGraph<EdgeWeight> contracted(numClusters, static_cast<EdgeIx>(edges.size()));
+
+    for (EdgeIx i = 0; i < edges.size(); /* incremented inside */) {
+        ContractedEdge combined = edges[i++];
+        while (i < edges.size() && edges[i].fx == combined.fx && edges[i].tx == combined.tx) {
+            combined.weight += edges[i].weight;
+            ++i;
+        }
+
+        contracted.addEdge(combined.fx, combined.tx, combined.weight);
+    }
+
+    return contracted.finalize();
+}
+
+template<MutableGraph InputGraph>
+CsrGraph<typename InputGraph::EdgeWeight> makeWeightedCsrGraph(const InputGraph& graph) {
+    using EdgeWeight = typename InputGraph::EdgeWeight;
+
+    std::vector<NodeIx> edges = graph.edges;
+    std::vector<EdgeIx> ranges = graph.ranges;
+    std::vector<EdgeWeight> weights(edges.size());
+
+    for (EdgeIx eix = 0; eix < edges.size(); ++eix) {
+        weights[eix] = graph.edgeWeight(eix);
+    }
+
+    return CsrGraph<EdgeWeight>(
+        graph.numNodes,
+        graph.numEdges,
+        std::move(edges),
+        std::move(ranges),
+        std::move(weights)
+    );
+}
+
+
+template<typename EdgeWeight>
 class ExpanderHierarchy {
 
-    using EdgeWeight = typename Graph::EdgeWeight;
+public:
+    using Graph = CsrGraph<EdgeWeight>;
 
     struct Level {
         Graph graph;
-        Partition<Graph> partition;
-        std::vector<EdgeIx> volumes;        // size: number of clusters; volume of each subtree
+        std::vector<EdgeWeight> volumes;    // size: number of clusters; volume of each subtree
         std::vector<EdgeWeight> cutSizes;   // size: number of clusters; value of cut leaving each cluster in the current graph
         std::vector<NodeIx> parents;        // size: numNodes of graph in level below; gives clusterId (= nix of parent) for each nix in the graph below
+        std::vector<NodeIx> children;        // packed inverse of parents
+        std::vector<EdgeIx> childrenStart;   // size: number of clusters + 1
+
+        [[nodiscard]]
+        std::span<const NodeIx> childrenOf(NodeIx parent) const {
+            return {
+                children.data() + childrenStart[parent],
+                childrenStart[parent + 1] - childrenStart[parent]
+            };
+        }
     };
 
     // levels[i].graph.numNodes == levels[i].volumes.size() == levels[i].cutSizes.size() == levels[i+1].parents.size()
 
+private:
     std::vector<Level> levels;
-    Graph* fullGraph;
+    Graph fullGraph;
     bool complete = false;
 
-    Level contract(Partition<Graph>& part) const;
+    template<MutableGraph PartGraph>
+    Level contract(Partition<PartGraph>& part) const;
 
-    template<bool first>
-    Level contract(Partition<Graph>& part) const;
+    template<bool first, MutableGraph PartGraph>
+    Level contract(Partition<PartGraph>& part) const;
 
 public:
+    explicit ExpanderHierarchy(Graph&& gr) : fullGraph{std::move(gr)} {}
 
-    explicit ExpanderHierarchy(Graph& gr) : fullGraph{&gr} {}
+    ExpanderHierarchy(const ExpanderHierarchy&) = delete;
+    ExpanderHierarchy& operator=(const ExpanderHierarchy&) = delete;
+    ExpanderHierarchy(ExpanderHierarchy&&) noexcept = default;
+    ExpanderHierarchy& operator=(ExpanderHierarchy&&) noexcept = default;
 
     void build() {
-        build(expander_decomposition::compute);
+        build([](Graph& graph, const Config& config) {
+            return expander_decomposition::compute(graph, config);
+        });
     }
 
     template<class Decomposer>
@@ -59,51 +154,58 @@ public:
         return levels[l];
     }
 
-    void subtractVolume(NodeIx l, NodeIx nix, EdgeIx vol) {
+    [[nodiscard]]
+    std::span<const NodeIx> children(NodeIx l, NodeIx parent) const {
+        return levels[l].childrenOf(parent);
+    }
+
+    void subtractVolume(NodeIx l, NodeIx nix, EdgeWeight vol) {
         levels[l].volumes[nix] -= vol;
     }
 
-    void addCut(NodeIx l, NodeIx nix, EdgeIx cut) {
+    void addCut(NodeIx l, NodeIx nix, EdgeWeight cut) {
         levels[l].cutSizes[nix] += cut;
     }
 
     Graph* getGraph() {
-        return fullGraph;
+        return &fullGraph;
     }
     const Graph* getGraph() const {
-        return fullGraph;
+        return &fullGraph;
     }
 };
 
-template<MutableGraph Graph>
-ExpanderHierarchy<Graph>::Level ExpanderHierarchy<Graph>::contract(Partition<Graph>& part) const {
+template<typename EdgeWeight>
+template<MutableGraph PartGraph>
+typename ExpanderHierarchy<EdgeWeight>::Level
+ExpanderHierarchy<EdgeWeight>::contract(Partition<PartGraph>& part) const {
+    static_assert(std::same_as<typename PartGraph::EdgeWeight, EdgeWeight>);
     if(levels.empty()) return contract<true>(part);
     else return contract<false>(part);
 }
 
 
-template<MutableGraph Graph>
-template<bool first>
-ExpanderHierarchy<Graph>::Level ExpanderHierarchy<Graph>::contract(Partition<Graph>& part) const {
-    const Graph& graph = part.getGraph();
+template<typename EdgeWeight>
+template<bool first, MutableGraph PartGraph>
+typename ExpanderHierarchy<EdgeWeight>::Level
+ExpanderHierarchy<EdgeWeight>::contract(Partition<PartGraph>& part) const {
+    static_assert(std::same_as<typename PartGraph::EdgeWeight, EdgeWeight>);
+    const PartGraph& graph = part.getGraph();
     if constexpr (!first) {
         assert(graph.numNodes == levels.back().graph.numNodes);
     }
-    std::vector<NodeIx> edges(2 * part.getNumCutEdges());
-    std::vector<EdgeIx> range(part.numClusters() + 1);
-    std::vector<EdgeIx> volumes(part.numClusters(), 0);
+
+    std::vector<EdgeWeight> volumes(part.numClusters(), 0);
     std::vector<EdgeWeight> cutSizes(part.numClusters(), 0);
-    range[0] = 0;
 
     NodeIx nix = 0;
     std::vector<NodeIx> clusterLookup(graph.numNodes, graph.numNodes + 1);
-    for(const Cluster<Graph>& cluster: part) {
+    for(const Cluster<PartGraph>& cluster: part) {
         if constexpr (first) {
             volumes[nix] = cluster.volume;
         }
-        for (const ClusterVertex<Graph>& cv: cluster) {
+        for (const ClusterVertex<PartGraph>& cv: cluster) {
             clusterLookup[cv.nix] = nix;
-            // assert(clusterLookup[cv.nix] == part.cvForNix(cv.nix)); // TODO: clusterLookup is redundant with Partition.lookup ?
             if constexpr (!first) {
                 volumes[nix] += levels.back().volumes[cv.nix];
             }
@@ -111,39 +213,51 @@ ExpanderHierarchy<Graph>::Level ExpanderHierarchy<Graph>::contract(Partition<Gra
         nix++;
     }
 
-    EdgeIx eix = 0;
     nix = 0;
-    for(const Cluster<Graph>& cluster: part) {
-        for (const ClusterVertex<Graph>& cv: cluster) {
-            for (auto it = cluster.edgeEnd(cv); it != graph.nend(cv.nix); ++it) {
-                NodeIx nb = *it;
+    for(const Cluster<PartGraph>& cluster: part) {
+        for (const ClusterVertex<PartGraph>& cv: cluster) {
+            for (EdgeIx eix = cv.end; eix < graph.endIndex(cv.nix); ++eix) {
+                NodeIx nb = graph.edges[eix];
                 assert(clusterLookup[nb] != nix);
                 assert(clusterLookup[nb] != graph.numNodes + 1);
-                edges[eix] = clusterLookup[nb];
-                cutSizes[nix]++;
-                eix++;
+                cutSizes[nix] += graph.edgeWeight(eix);
             }
         }
         assert(cutSizes[nix] == cluster.volume - cluster.internalVolume);
         nix++;
-        range[nix] = eix;
+    }
+
+    std::vector<EdgeIx> childrenStart(part.numClusters() + 1);
+    for (NodeIx parent : clusterLookup) {
+        ++childrenStart[parent + 1];
+    }
+    for (NodeIx parent = 0; parent < part.numClusters(); ++parent) {
+        childrenStart[parent + 1] += childrenStart[parent];
+    }
+
+    std::vector<NodeIx> children(graph.numNodes);
+    std::vector<EdgeIx> nextChild = childrenStart;
+    for (NodeIx child = 0; child < graph.numNodes; ++child) {
+        const NodeIx parent = clusterLookup[child];
+        children[nextChild[parent]++] = child;
     }
 
     return {
-        Graph(std::move(edges), std::move(range), part.numClusters(), part.getNumCutEdges()),
-        std::move(part),
+        contractGraph(graph, part.numClusters(), clusterLookup),
         std::move(volumes),
         std::move(cutSizes),
-        std::move(clusterLookup)
+        std::move(clusterLookup),
+        std::move(children),
+        std::move(childrenStart)
     };
 }
 
 
 
-template<MutableGraph Graph>
+template<typename EdgeWeight>
 template<class Decomposer>
-void ExpanderHierarchy<Graph>::build(Decomposer&& decompose) {
-    Graph* current = fullGraph;
+void ExpanderHierarchy<EdgeWeight>::build(Decomposer&& decompose) {
+    Graph* current = &fullGraph;
     Config conf{};
     Timer t;
 
@@ -161,18 +275,12 @@ void ExpanderHierarchy<Graph>::build(Decomposer&& decompose) {
         EdgeIx cutSize = ed.getNumCutEdges();
 
         Level lvl = contract(ed);
-        levels.push_back(lvl); // warning: may invalidate Partition (contains self-pointers)!
+        levels.push_back(std::move(lvl)); // warning: may invalidate Partition (contains self-pointers)!
         current = &levels.back().graph;
 
         auto timeSpent = t.timeSeconds();
         // WARN("Level " << levels.size() << " (" << timeSpent << "s)\t\t-> " << numClusters << " clusters with " << cutSize << " crossing edges");
     } while(current->numNodes > 1);
-
-
-    // a bit ugly
-    for(Level& lvl : levels) {
-        lvl.partition.updateSelfReferences();
-    }
 
     complete = true;
 
@@ -180,14 +288,14 @@ void ExpanderHierarchy<Graph>::build(Decomposer&& decompose) {
 }
 
 
-template<MutableGraph Graph>
+template<typename EdgeWeight>
 template<typename T>
-double ExpanderHierarchy<Graph>::predict(const T& demands) const {
-    assert(demands.size() == fullGraph->numNodes);
+double ExpanderHierarchy<EdgeWeight>::predict(const T& demands) const {
+    assert(demands.size() == fullGraph.numNodes);
     assert(complete);
 
     std::vector<double> current(std::begin(demands), std::end(demands));
-    std::vector<double> next(fullGraph->numNodes, 0.0);
+    std::vector<double> next(fullGraph.numNodes, 0.0);
 
     const double totalDemand = std::accumulate(current.begin(), current.end(), 0.0);
     if (std::abs(totalDemand) > 1e-8) {
@@ -200,11 +308,10 @@ double ExpanderHierarchy<Graph>::predict(const T& demands) const {
         const NodeIx numClusters = lvl.graph.numNodes;
         std::fill_n(next.begin(), numClusters, 0.0);
 
-        NodeIx clusterId = 0;
-        for (const Cluster<Graph>& cluster : lvl.partition) {
+        for (NodeIx clusterId = 0; clusterId < numClusters; ++clusterId) {
             double clusterDemand = 0.0;
-            for (const ClusterVertex<Graph>& cv : cluster) {
-                clusterDemand += current[cv.nix];
+            for (NodeIx child : lvl.childrenOf(clusterId)) {
+                clusterDemand += current[child];
             }
 
             if (lvl.cutSizes[clusterId] > 0) {
@@ -215,13 +322,26 @@ double ExpanderHierarchy<Graph>::predict(const T& demands) const {
             }
 
             next[clusterId] = clusterDemand;
-            clusterId++;
         }
 
         std::swap(current, next);
     }
 
     return maxCongestion;
+}
+
+template<MutableGraph InputGraph, class Decomposer>
+ExpanderHierarchy<typename InputGraph::EdgeWeight> buildExpanderHierarchy(InputGraph& graph, Decomposer&& decompose) {
+    ExpanderHierarchy<typename InputGraph::EdgeWeight> hierarchy{makeWeightedCsrGraph(graph)};
+    hierarchy.build(std::forward<Decomposer>(decompose));
+    return hierarchy;
+}
+
+template<MutableGraph InputGraph>
+ExpanderHierarchy<typename InputGraph::EdgeWeight> buildExpanderHierarchy(InputGraph& graph) {
+    ExpanderHierarchy<typename InputGraph::EdgeWeight> hierarchy{makeWeightedCsrGraph(graph)};
+    hierarchy.build();
+    return hierarchy;
 }
 
 

@@ -205,6 +205,11 @@ public:
     }
 
     [[nodiscard]]
+    EdgeIx endIndex(NodeIx node) const noexcept {
+        return ranges[node+1];
+    }
+
+    [[nodiscard]]
     EdgeIx degree(NodeIx node) const noexcept {
         return ranges[node + 1] - ranges[node];
     }
