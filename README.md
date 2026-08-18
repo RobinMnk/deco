@@ -1,6 +1,9 @@
-# Deco
+# Deco: Graph Decomposition Library
 
-Deco is a C++/CUDA project for expander decompositions, tree cut sparsifiers, and downstream graph partitioning applications.
+Deco is a high-performance C++ library for computing graph decompositions based on **algorithms with provable guarantees**. 
+
+
+project for expander decompositions, tree cut sparsifiers, and downstream graph partitioning applications.
 
 Expander decompositions are a central tool in modern graph algorithms. They partition a graph into well-connected pieces while keeping the number of edges between pieces small. This structure is useful for routing, cut and flow problems, sparsification, dynamic connectivity, congestion approximation, and graph partitioning objectives such as normalized cut.
 

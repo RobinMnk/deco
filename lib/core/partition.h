@@ -102,7 +102,7 @@ private:
     std::vector<uint16_t> splitOracle;
     std::vector<NodeIx> lookup; // gives the index in permutation for a given NodeIx
     std::vector<uint8_t> sc_seen; // tracks seen nodes in sweepCut procedure. Note: vector<uint8_t> is faster than vector<bool> but uses 8x memory
-    std::vector<EdgeIx> sc_removeAt; // tracks number of edges ending at given node, used in sweepCut procedure.
+    std::vector<EdgeWeight> sc_removeAt; // tracks number of edges ending at given node, used in sweepCut procedure.
     EdgeIx numCutEdges;
     EdgeWeight cutSize;
     DFS dfs;

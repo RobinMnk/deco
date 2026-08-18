@@ -42,8 +42,8 @@ public:
 
         for (size_t i = 0; i < m_distribution.size(); i++) {
             // generate a normal distributed number
-            EdgeIx deg = gr.degree(i);
-            std::normal_distribution<>::param_type stdev(0.0, std::sqrt(deg));
+            auto deg = gr.weightedDegree(i);
+            std::normal_distribution<>::param_type stdev(0.0, std::sqrt(static_cast<frac_t>(deg)));
             frac_t x = normal_distribution(random_source, stdev);
             m_distribution[i] = x;
 

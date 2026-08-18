@@ -21,6 +21,20 @@ endif()
 
 if(DECO_BUILD_CLI)
     add_executable(Deco cli/deco.cpp)
+
+    target_compile_options(Deco PRIVATE
+            $<$<AND:$<CONFIG:Release>,$<CXX_COMPILER_ID:GNU,Clang>>:
+            -O3
+            -march=native
+            -mtune=native
+            -ffast-math
+            >
+            $<$<AND:$<CONFIG:Release>,$<CXX_COMPILER_ID:MSVC>>:
+            /O2
+            /Ob2
+            >
+    )
+
     target_link_libraries(Deco PRIVATE DecoLib)
 
     if(DECO_ENABLE_CUDA)

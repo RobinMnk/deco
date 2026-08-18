@@ -48,6 +48,14 @@ namespace expander_decomposition {
 
         size_t numSteps = config.initialNumSteps;
 
+        constexpr std::string_view weightType =
+            std::same_as<Graph, CsrGraph<>> ? "unweighted" :
+            std::same_as<typename Graph::EdgeWeight, int_t>  ? "int_t" :
+            std::same_as<typename Graph::EdgeWeight, frac_t> ? "frac_t" :
+                                               "unknown";
+
+            std::cout << "Starting Expander Decomposition: " << weightType << std::endl;
+
         while(!next.empty()) {
             std::swap(active, next);
             next.clear(); // can be replaced by custom queue with lazy delete
@@ -62,10 +70,12 @@ namespace expander_decomposition {
 
                 const Cluster<Graph>& current = decomposition.getCluster(clusterId);
 
-                if(std::abs(walk.averageOf(current)) > config.randomWalkThreshold) {
-                    std::cout << "Cluster average: " << std::abs(walk.averageOf(current)) << std::endl;
-                    WARN("\nCLUSTER CAN NEVER CONVERGE!!!\n");
-                }
+                walk.recenterCluster(current);
+
+                // if(std::abs(walk.averageOf(current)) > config.randomWalkThreshold) {
+                //     std::cout << "Cluster average: " << std::abs(walk.averageOf(current)) << std::endl;
+                //     WARN("\nCLUSTER CAN NEVER CONVERGE!!!\n");
+                // }
 
                 LOG("  working on cluster " << clusterId << "\t (" << current.size() << " nodes, potential: " << walk.potential(current) << ")");
 
@@ -82,10 +92,10 @@ namespace expander_decomposition {
                 LOG("     Sweep cut:   sparsity=" << sweepCut.sparsity << ", offset=" << sweepCut.offset);
 
                 // if(isSparse(current, sweepCut.sparsity, config)) {
-                if(sweepCut.sparsity < config.targetSparsity) {
+                if(sweepCut.sparsity <= config.targetSparsity) {
                     LOG("       -> considered sparse -> cutting");
                     std::vector<NodeIx> modified{clusterId};
-                    decomposition.template split<false>(clusterId, sweepCut.offset, modified);
+                    decomposition.template split<false, true>(clusterId, sweepCut.offset, modified);
 
                     numSteps = config.mainNumSteps;
 
@@ -117,7 +127,8 @@ namespace expander_decomposition {
                     }
                 } else {
                     if constexpr (strategy.cutWhenConverged) {
-                        if(!isConverged(current, walk.potential(current), config)) {
+                        // if(!isConverged(current, walk.potential(current), config)) {
+                        if(walk.potential(current) > config.randomWalkThreshold) {
                             next.push_back(clusterId);
                         } else {
                             LOG("       -> potential sufficiently low -> certified expander");

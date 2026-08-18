@@ -13,6 +13,7 @@
 #include <unordered_map>
 #include <stdexcept>
 #include <cstdint>
+#include <cmath>
 #include <variant>
 
 using AnyGraph = std::variant<
@@ -97,14 +98,42 @@ DynamicGraph<Spec> read_mtx_dynamic_impl(std::ifstream& file, const MtxHeader& h
     NodeIx u = 0, v = 0;
 
     while (file >> u >> v) {
+        if (u == 0 || v == 0 || u > n || v > n) {
+            throw std::runtime_error("Matrix Market node index out of range.");
+        }
+
+        weight_type w{1};
         if constexpr (is_weighted_policy<Policy>::value) {
-            dg.addEdge(u, v);
-        } else {
-            weight_type w{1};
-            if (header.value_type != MtxValueType::Unweighted) {
-                file >> w;
+            if (header.value_type != MtxValueType::Unweighted && !(file >> w)) {
+                throw std::runtime_error("Failed to parse Matrix Market edge weight.");
             }
+        }
+
+        --u;
+        --v;
+
+        if (u == v) {
+            continue;
+        }
+
+        if constexpr (is_weighted_policy<Policy>::value) {
+            if constexpr (std::floating_point<weight_type>) {
+                if (!std::isfinite(w)) {
+                    throw std::runtime_error("Matrix Market edge weight must be finite.");
+                }
+            }
+
+            if (w < weight_type{}) {
+                throw std::runtime_error("Matrix Market edge weight must be nonnegative.");
+            }
+
+            if (w == weight_type{}) {
+                continue;
+            }
+
             dg.addEdge(u, v, w);
+        } else {
+            dg.addEdge(u, v);
         }
     }
 
@@ -125,11 +154,11 @@ inline AnyGraph load_mtx_dynamic(const std::string& filepath) {
             return dg.finalize();
         }
         case MtxValueType::Real: {
-            DynamicGraph<double> dg = read_mtx_dynamic_impl<double>(file, header);
+            DynamicGraph<frac_t> dg = read_mtx_dynamic_impl<frac_t>(file, header);
             return dg.finalize();
         }
         case MtxValueType::Integer: {
-            DynamicGraph<int64_t> dg = read_mtx_dynamic_impl<int64_t>(file, header);
+            DynamicGraph<int_t> dg = read_mtx_dynamic_impl<int_t>(file, header);
             return dg.finalize();
         }
     }

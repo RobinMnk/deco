@@ -8,6 +8,8 @@
 #include "utils/graph_io.h"
 #include "utils/timer.h"
 
+#include <type_traits>
+
 void checkBuildMode() {
     #ifdef NDEBUG
         std::cout << "Running in RELEASE mode!" << std::endl;
@@ -47,12 +49,26 @@ void checkBuildMode() {
 
 template<MutableGraph GraphT>
 void run(GraphT& G) {
+    using EdgeWeight = typename GraphT::EdgeWeight;
+    constexpr std::string_view weightType =
+        std::same_as<GraphT, CsrGraph<>> ? "unweighted" :
+        std::same_as<EdgeWeight, int_t>  ? "int_t" :
+        std::same_as<EdgeWeight, frac_t> ? "frac_t" :
+                                           "unknown";
+
+    std::cout << "Graph: " << G.numNodes << " nodes, " << G.numEdges
+              << " edges, weight type: " << weightType << std::endl;
+
     Timer t;
     t.start();
-    auto expDec = expander_decomposition::compute(G);
+    auto expDec = buildExpanderHierarchy(G);
+    // auto expDec = expander_decomposition::compute(G);
     auto millis = t.timeMillis();
 
-    printf("time: %lld\nnumClusters: %d\ncutEdges: %d\ncutWeight: %d\nnodes: %d\nedges: %d\n", millis, expDec.numClusters(), expDec.getNumCutEdges(), expDec.getCutSize(), G.numNodes, G.numEdges);
+    printf("time: %lldms\nnodes: %d\nedges: %d\n", millis, G.numNodes, G.numEdges);
+
+    // printf("time: %lld\nnumClusters: %d\ncutEdges: %d\nnodes: %d\nedges: %d\n", millis, expDec.numClusters(), expDec.getNumCutEdges(), G.numNodes, G.numEdges);
+    // std::cout << "Cut size: " << expDec.getCutSize() << std::endl;
 }
 
 void test(MutableGraph auto& G) {

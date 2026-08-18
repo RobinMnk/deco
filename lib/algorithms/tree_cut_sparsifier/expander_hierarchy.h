@@ -68,26 +68,26 @@ CsrGraph<typename Graph::EdgeWeight> contractGraph(const Graph& graph, NodeIx nu
     return contracted.finalize();
 }
 
-template<MutableGraph InputGraph>
-CsrGraph<typename InputGraph::EdgeWeight> makeWeightedCsrGraph(const InputGraph& graph) {
-    using EdgeWeight = typename InputGraph::EdgeWeight;
-
-    std::vector<NodeIx> edges = graph.edges;
-    std::vector<EdgeIx> ranges = graph.ranges;
-    std::vector<EdgeWeight> weights(edges.size());
-
-    for (EdgeIx eix = 0; eix < edges.size(); ++eix) {
-        weights[eix] = graph.edgeWeight(eix);
-    }
-
-    return CsrGraph<EdgeWeight>(
-        graph.numNodes,
-        graph.numEdges,
-        std::move(edges),
-        std::move(ranges),
-        std::move(weights)
-    );
-}
+// template<MutableGraph InputGraph>
+// CsrGraph<typename InputGraph::EdgeWeight> makeWeightedCsrGraph(const InputGraph& graph) {
+//     using EdgeWeight = typename InputGraph::EdgeWeight;
+//
+//     std::vector<NodeIx> edges = graph.edges;
+//     std::vector<EdgeIx> ranges = graph.ranges;
+//     std::vector<EdgeWeight> weights(edges.size());
+//
+//     for (EdgeIx eix = 0; eix < edges.size(); ++eix) {
+//         weights[eix] = graph.edgeWeight(eix);
+//     }
+//
+//     return CsrGraph<EdgeWeight>(
+//         graph.numNodes,
+//         graph.numEdges,
+//         std::move(edges),
+//         std::move(ranges),
+//         std::move(weights)
+//     );
+// }
 
 
 template<typename EdgeWeight>
@@ -118,6 +118,7 @@ public:
 private:
     std::vector<Level> levels;
     Graph fullGraph;
+    NodeIx originalNumNodes{0};
     bool complete = false;
 
     template<MutableGraph PartGraph>
@@ -127,7 +128,8 @@ private:
     Level contract(Partition<PartGraph>& part) const;
 
 public:
-    explicit ExpanderHierarchy(Graph&& gr) : fullGraph{std::move(gr)} {}
+    explicit ExpanderHierarchy(Graph&& gr) : fullGraph{std::move(gr)}, originalNumNodes{fullGraph.numNodes} {}
+    explicit ExpanderHierarchy(NodeIx n) : originalNumNodes{n} {}
 
     ExpanderHierarchy(const ExpanderHierarchy&) = delete;
     ExpanderHierarchy& operator=(const ExpanderHierarchy&) = delete;
@@ -142,6 +144,14 @@ public:
 
     template<class Decomposer>
     void build(Decomposer&& decompose);
+
+    template<MutableGraph PartGraph>
+    void appendLevel(Partition<PartGraph>& part) {
+        levels.push_back(contract(part));
+    }
+
+    template<class Decomposer>
+    void buildUpperLevels(Decomposer&& decompose, Config conf = {});
 
     template<typename T>
     double predict(const T& demands) const;
@@ -279,7 +289,7 @@ void ExpanderHierarchy<EdgeWeight>::build(Decomposer&& decompose) {
         current = &levels.back().graph;
 
         auto timeSpent = t.timeSeconds();
-        // WARN("Level " << levels.size() << " (" << timeSpent << "s)\t\t-> " << numClusters << " clusters with " << cutSize << " crossing edges");
+        WARN("Level " << levels.size() << " (" << timeSpent << "s)\t\t-> " << numClusters << " clusters with " << cutSize << " crossing edges");
     } while(current->numNodes > 1);
 
     complete = true;
@@ -287,15 +297,47 @@ void ExpanderHierarchy<EdgeWeight>::build(Decomposer&& decompose) {
     // WARN("Completed Hierarchy");
 }
 
+template<typename EdgeWeight>
+template<class Decomposer>
+void ExpanderHierarchy<EdgeWeight>::buildUpperLevels(Decomposer&& decompose, Config conf) {
+    assert(!levels.empty());
+
+    Graph* current = &levels.back().graph;
+    Timer t;
+
+    while(current->numNodes > 1) {
+        t.start();
+        Partition ed = decompose(*current, conf);
+
+        if(ed.getNumCutEdges() > 0.95 * current->numEdges) {
+            conf.targetSparsity /= 2;
+            WARN("\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t Adjusting targetSparsity to " << conf.targetSparsity);
+            continue;
+        }
+
+        NodeIx numClusters = ed.numClusters();
+        EdgeIx cutSize = ed.getNumCutEdges();
+
+        Level lvl = contract(ed);
+        levels.push_back(std::move(lvl));
+        current = &levels.back().graph;
+
+        auto timeSpent = t.timeSeconds();
+        WARN("Level " << levels.size() << " (" << timeSpent << "s)\t\t-> " << numClusters << " clusters with " << cutSize << " crossing edges of weight " << ed.getCutSize());
+    }
+
+    complete = true;
+}
+
 
 template<typename EdgeWeight>
 template<typename T>
 double ExpanderHierarchy<EdgeWeight>::predict(const T& demands) const {
-    assert(demands.size() == fullGraph.numNodes);
+    assert(demands.size() == originalNumNodes);
     assert(complete);
 
     std::vector<double> current(std::begin(demands), std::end(demands));
-    std::vector<double> next(fullGraph.numNodes, 0.0);
+    std::vector<double> next(originalNumNodes, 0.0);
 
     const double totalDemand = std::accumulate(current.begin(), current.end(), 0.0);
     if (std::abs(totalDemand) > 1e-8) {
@@ -332,16 +374,41 @@ double ExpanderHierarchy<EdgeWeight>::predict(const T& demands) const {
 
 template<MutableGraph InputGraph, class Decomposer>
 ExpanderHierarchy<typename InputGraph::EdgeWeight> buildExpanderHierarchy(InputGraph& graph, Decomposer&& decompose) {
-    ExpanderHierarchy<typename InputGraph::EdgeWeight> hierarchy{makeWeightedCsrGraph(graph)};
-    hierarchy.build(std::forward<Decomposer>(decompose));
+    using EdgeWeight = typename InputGraph::EdgeWeight;
+
+    ExpanderHierarchy<EdgeWeight> hierarchy{graph.numNodes};
+    Config conf{};
+
+    while (true) {
+        Timer t;
+        t.start();
+        Partition first = decompose(graph, conf);
+
+        if(first.getNumCutEdges() > 0.95 * graph.numEdges) {
+            conf.targetSparsity /= 2;
+            WARN("\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t Adjusting targetSparsity to " << conf.targetSparsity);
+            continue;
+        }
+
+        auto timeSpent = t.timeSeconds();
+        WARN("Level 1 (" << timeSpent << "s)\t\t-> " << first.numClusters() << " clusters with " << first.getNumCutEdges() << " crossing edges of weight " << first.getCutSize());
+
+        hierarchy.appendLevel(first);
+        break;
+    }
+
+    hierarchy.buildUpperLevels(std::forward<Decomposer>(decompose), conf);
     return hierarchy;
 }
 
 template<MutableGraph InputGraph>
 ExpanderHierarchy<typename InputGraph::EdgeWeight> buildExpanderHierarchy(InputGraph& graph) {
-    ExpanderHierarchy<typename InputGraph::EdgeWeight> hierarchy{makeWeightedCsrGraph(graph)};
-    hierarchy.build();
-    return hierarchy;
+    return buildExpanderHierarchy(
+        graph,
+        [](auto& current, const Config& config) {
+            return expander_decomposition::compute(current, config);
+        }
+    );
 }
 
 
