@@ -27,7 +27,6 @@ class NormalizedCut {
     };
 
     Hierarchy* hierarchy;
-    Graph* graph;
     std::vector<NodeIx> labels;
     std::set<TreeNode> roots; // for some reason, hashing TreeNode is very annoying ... so using set instead
 
@@ -105,14 +104,14 @@ class NormalizedCut {
     }
 
 public:
-    explicit NormalizedCut(Hierarchy& eh)
-        : hierarchy{&eh}, graph{eh.getGraph()}, labels(graph->numNodes, 0), roots() {}
+    explicit NormalizedCut(Hierarchy& eh) : hierarchy{&eh}, labels(eh.getNumNodes(), 0), roots() {}
 
     /**
      * Splits the Graph into k clusters, minimizing the normalized cut objective. Adjusts the sparsifier accordingly and returns the resulting partition.
      * @param k number of clusters
      */
-    Partition<Graph> compute(NodeIx k) {
+    template<MutableGraph Graph>
+    Partition<Graph> compute(Graph& G, NodeIx k) {
         roots.emplace(hierarchy->height() - 1, 0);
 
         for (NodeIx i = 1; i <= k; ++i) {
@@ -140,7 +139,7 @@ public:
             roots.insert(bestCandidate.tn);
         }
 
-        Partition<Graph> part{*graph};
+        Partition<Graph> part{G};
         std::vector<NodeIx> mod;
         // This modifies the underlying graph, which invalidates the sparsifier.
         part.template splitByIndices<false, false>(0, labels, k, mod);

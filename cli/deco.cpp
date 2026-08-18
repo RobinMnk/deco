@@ -1,4 +1,5 @@
 
+#include "algorithms/applications/normalized_cut.h"
 #include "algorithms/tree_cut_sparsifier/expander_hierarchy.h"
 #ifdef DECO_ENABLE_CUDA
 #include "algorithms/expander_decomposition/cuda.h"
@@ -66,6 +67,14 @@ void run(GraphT& G) {
     auto millis = t.timeMillis();
 
     printf("time: %lldms\nnodes: %d\nedges: %d\n", millis, G.numNodes, G.numEdges);
+
+    t.start();
+    auto NC = NormalizedCut(expDec);
+    auto kPart = NC.compute(G, 16);
+    double ncVal = compute_normalized_cut(kPart);
+    millis = t.timeMillis();
+
+    printf("NC time: %lldms\nNC: %f\n", millis, ncVal);
 
     // printf("time: %lld\nnumClusters: %d\ncutEdges: %d\nnodes: %d\nedges: %d\n", millis, expDec.numClusters(), expDec.getNumCutEdges(), G.numNodes, G.numEdges);
     // std::cout << "Cut size: " << expDec.getCutSize() << std::endl;

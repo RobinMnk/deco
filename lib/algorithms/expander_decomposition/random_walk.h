@@ -6,7 +6,6 @@
 #define RCUT_RANDOM_WALK_H
 
 #include "core/partition.h"
-#include <valarray>
 #include <random>
 
 inline thread_local std::mt19937 random_source{1};
@@ -19,8 +18,8 @@ template<MutableGraph Graph>
 class RandomWalk {
 
     // TODO: make std::vector -> better for sparse active nodes!!
-    std::valarray<frac_t> m_distribution;
-    std::valarray<frac_t> m_old_distribution;
+    std::vector<frac_t> m_distribution;
+    std::vector<frac_t> m_old_distribution;
 
     const Graph& G;
 
@@ -51,7 +50,9 @@ public:
             avg += (x - avg) / (static_cast<frac_t >(i) + 1.0f);
         }
 
-        m_distribution -= avg;
+        for (size_t i = 0; i < m_distribution.size(); i++) {
+            m_distribution[i] -= avg;
+        }
     }
 
     frac_t resetCluster(const Cluster<Graph>& cluster) {
@@ -82,13 +83,19 @@ public:
 
     void iterate(const Partition<Graph>& part, const std::vector<NodeIx>& active) {
         std::swap(m_old_distribution, m_distribution);
-        m_distribution = 0;
+
+        for(NodeIx clusterId: active) {
+            const Cluster<Graph>& cluster = part.getCluster(clusterId);
+            for(const ClusterVertex<Graph>& cv: cluster) {
+                m_distribution[cv.nix] = rw_stay * m_old_distribution[cv.nix];
+            }
+        }
 
         for(NodeIx clusterId: active) {
             const Cluster<Graph>& cluster = part.getCluster(clusterId);
             for(const ClusterVertex<Graph>& cv: cluster) {
                 if (cv.internalDegree == 0) continue;
-                frac_t val = m_old_distribution[cv.nix] / static_cast<frac_t>(cv.internalDegree);
+                frac_t val = (1.0 - rw_stay) * m_old_distribution[cv.nix] / static_cast<frac_t>(cv.internalDegree);
 
                 for (EdgeIx eix: cluster.internalEdgeIndices(cv)) {
                     NodeIx nb = G.edges[eix];
@@ -96,19 +103,11 @@ public:
 
                     m_distribution[nb] += val * static_cast<frac_t>(wgt);
                 }
-
-                // for (auto it = cluster.edgeBegin(cv); it != cluster.edgeEnd(cv); ++it) {
-                //     NodeIx nb = *it;
-                //     m_distribution[nb] += val;
-                // }
             }
         }
-
-        m_distribution *= (1.0 - rw_stay);
-        m_distribution += rw_stay * m_old_distribution;
     }
 
-    const std::valarray<frac_t>& values() {
+    const std::vector<frac_t>& values() const {
         return m_distribution;
     }
 

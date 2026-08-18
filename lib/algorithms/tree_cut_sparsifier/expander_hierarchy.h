@@ -117,7 +117,6 @@ public:
 
 private:
     std::vector<Level> levels;
-    Graph fullGraph;
     NodeIx originalNumNodes{0};
     bool complete = false;
 
@@ -128,7 +127,6 @@ private:
     Level contract(Partition<PartGraph>& part) const;
 
 public:
-    explicit ExpanderHierarchy(Graph&& gr) : fullGraph{std::move(gr)}, originalNumNodes{fullGraph.numNodes} {}
     explicit ExpanderHierarchy(NodeIx n) : originalNumNodes{n} {}
 
     ExpanderHierarchy(const ExpanderHierarchy&) = delete;
@@ -160,6 +158,10 @@ public:
         return levels.size();
     }
 
+    NodeIx getNumNodes() const {
+        return originalNumNodes;
+    }
+
     const Level& lvl(NodeIx l) const {
         return levels[l];
     }
@@ -175,13 +177,6 @@ public:
 
     void addCut(NodeIx l, NodeIx nix, EdgeWeight cut) {
         levels[l].cutSizes[nix] += cut;
-    }
-
-    Graph* getGraph() {
-        return &fullGraph;
-    }
-    const Graph* getGraph() const {
-        return &fullGraph;
     }
 };
 
@@ -260,41 +255,6 @@ ExpanderHierarchy<EdgeWeight>::contract(Partition<PartGraph>& part) const {
         std::move(children),
         std::move(childrenStart)
     };
-}
-
-
-
-template<typename EdgeWeight>
-template<class Decomposer>
-void ExpanderHierarchy<EdgeWeight>::build(Decomposer&& decompose) {
-    Graph* current = &fullGraph;
-    Config conf{};
-    Timer t;
-
-    do {
-        t.start();
-        Partition ed = decompose(*current, conf);
-
-        if(ed.getNumCutEdges() > 0.95 * current->numEdges) {
-            conf.targetSparsity /= 2;
-            WARN("\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t Adjusting targetSparsity to " << conf.targetSparsity);
-            continue;
-        }
-
-        NodeIx numClusters = ed.numClusters();
-        EdgeIx cutSize = ed.getNumCutEdges();
-
-        Level lvl = contract(ed);
-        levels.push_back(std::move(lvl)); // warning: may invalidate Partition (contains self-pointers)!
-        current = &levels.back().graph;
-
-        auto timeSpent = t.timeSeconds();
-        WARN("Level " << levels.size() << " (" << timeSpent << "s)\t\t-> " << numClusters << " clusters with " << cutSize << " crossing edges");
-    } while(current->numNodes > 1);
-
-    complete = true;
-
-    // WARN("Completed Hierarchy");
 }
 
 template<typename EdgeWeight>
