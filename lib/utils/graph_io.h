@@ -44,7 +44,7 @@ inline MtxHeader parse_mtx_header(std::ifstream& file) {
 
     std::stringstream banner_ss(line);
     std::string banner, object, format, field, symmetry;
-    if (!(banner_ss >> banner >> object >> format >> field >> symmetry) || banner != "%%MatrixMarket") {
+    if (!(banner_ss >> banner >> object >> format >> field >> symmetry) || (banner != "%%MatrixMarket" && banner != "%MatrixMarket")) {
         throw std::runtime_error("Invalid Matrix Market header banner.");
     }
 

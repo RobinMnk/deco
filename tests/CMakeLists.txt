@@ -23,10 +23,16 @@ function(configure_test_target target_name source_file)
         target_compile_definitions(${target_name} PRIVATE _CRT_DECLARE_NONSTDC_NAMES=1)
     endif()
 
+    if (MINGW)
+        target_link_options(${target_name} PRIVATE -static-libgcc -static-libstdc++)
+    endif()
+
     include(GoogleTest)
-    gtest_discover_tests(${target_name})
+    gtest_add_tests(TARGET ${target_name})
 endfunction()
 
+
+configure_test_target(graphTest graphTest.cpp)
 configure_test_target(clusterTest clusterTest.cpp)
 
 if(DECO_ENABLE_CUDA)

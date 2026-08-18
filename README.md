@@ -3,6 +3,8 @@
 Deco is a high-performance C++ library for computing graph decompositions based on **algorithms with provable guarantees**. 
 
 
+
+
 project for expander decompositions, tree cut sparsifiers, and downstream graph partitioning applications.
 
 Expander decompositions are a central tool in modern graph algorithms. They partition a graph into well-connected pieces while keeping the number of edges between pieces small. This structure is useful for routing, cut and flow problems, sparsification, dynamic connectivity, congestion approximation, and graph partitioning objectives such as normalized cut.
@@ -64,11 +66,10 @@ The source layout mirrors those roles:
 ```text
 lib/core/                         graph and partition data structures
 lib/algorithms/expander_decomposition/
-                                  public CPU and optional CUDA decomposition headers
+                                  CPU decomposition and optional CUDA implementation
 lib/algorithms/tree_cut_sparsifier/
                                   public expander hierarchy headers
 lib/algorithms/applications/      downstream uses, currently normalized cut
-src/                              compiled implementations and private CUDA internals
 cli/                              command-line executable
 ```
 
@@ -91,7 +92,7 @@ The CUDA library currently targets these GPU architectures:
 CUDA_ARCHITECTURES "80;86"
 ```
 
-This is configured in `src/algorithms/expander_decomposition/cuda/CMakeLists.txt`. If your GPU uses a different compute capability, update that setting before building.
+This is configured in `lib/algorithms/expander_decomposition/cuda/internal/CMakeLists.txt`. If your GPU uses a different compute capability, update that setting before building.
 
 ## Building
 

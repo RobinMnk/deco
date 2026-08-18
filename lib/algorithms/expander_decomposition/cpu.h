@@ -48,13 +48,13 @@ namespace expander_decomposition {
 
         size_t numSteps = config.initialNumSteps;
 
-        constexpr std::string_view weightType =
-            std::same_as<Graph, CsrGraph<>> ? "unweighted" :
-            std::same_as<typename Graph::EdgeWeight, int_t>  ? "int_t" :
-            std::same_as<typename Graph::EdgeWeight, frac_t> ? "frac_t" :
-                                               "unknown";
-
-            std::cout << "Starting Expander Decomposition: " << weightType << std::endl;
+        // constexpr std::string_view weightType =
+        //     std::same_as<Graph, CsrGraph<>> ? "unweighted" :
+        //     std::same_as<typename Graph::EdgeWeight, int_t>  ? "int_t" :
+        //     std::same_as<typename Graph::EdgeWeight, frac_t> ? "frac_t" :
+        //                                        "unknown";
+        //
+        //     std::cout << "Starting Expander Decomposition: " << weightType << std::endl;
 
         while(!next.empty()) {
             std::swap(active, next);
@@ -70,12 +70,12 @@ namespace expander_decomposition {
 
                 const Cluster<Graph>& current = decomposition.getCluster(clusterId);
 
-                walk.recenterCluster(current);
+                // walk.recenterCluster(current);
 
-                // if(std::abs(walk.averageOf(current)) > config.randomWalkThreshold) {
-                //     std::cout << "Cluster average: " << std::abs(walk.averageOf(current)) << std::endl;
-                //     WARN("\nCLUSTER CAN NEVER CONVERGE!!!\n");
-                // }
+                if(std::abs(walk.averageOf(current)) > config.randomWalkThreshold) {
+                    std::cout << "Cluster average: " << std::abs(walk.averageOf(current)) << std::endl;
+                    WARN("\nCLUSTER CAN NEVER CONVERGE!!!\n");
+                }
 
                 LOG("  working on cluster " << clusterId << "\t (" << current.size() << " nodes, potential: " << walk.potential(current) << ")");
 

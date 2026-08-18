@@ -5,17 +5,18 @@ set(CMAKE_CXX_STANDARD 20)
 
 option(DECO_ENABLE_CUDA "Build CUDA expander decomposition" OFF)
 option(DECO_BUILD_CLI "Build command-line executable" ON)
-option(DECO_BUILD_TESTS "Build tests" OFF)
+option(DECO_BUILD_TESTS "Build tests" ON)
 
 add_subdirectory(lib)
 
 if(DECO_ENABLE_CUDA)
     enable_language(CUDA)
     set(CMAKE_CUDA_STANDARD 17)
-    add_subdirectory(src/algorithms/expander_decomposition/cuda)
+    add_subdirectory(lib/algorithms/expander_decomposition/cuda/internal)
 endif()
 
 if(DECO_BUILD_TESTS)
+    enable_testing()
     add_subdirectory(tests)
 endif()
 
