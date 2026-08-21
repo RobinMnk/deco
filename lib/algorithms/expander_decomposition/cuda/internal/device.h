@@ -19,11 +19,7 @@ struct CudaDeviceManager::Impl {
     std::unique_ptr<SweepCutManager> sc;
     std::unique_ptr<ConsolidationManager> cm;
 
-    Graph gr;
-
     void initialize(const Graph& graph) {
-        gr = graph;
-
         gm.reset();
         pt.reset();
         rw.reset();

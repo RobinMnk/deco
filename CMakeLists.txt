@@ -3,7 +3,7 @@ project(Deco LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 
-option(DECO_ENABLE_CUDA "Build CUDA expander decomposition" OFF)
+option(DECO_ENABLE_CUDA "Build CUDA expander decomposition" ON)
 option(DECO_BUILD_CLI "Build command-line executable" ON)
 option(DECO_BUILD_TESTS "Build tests" ON)
 
@@ -11,6 +11,7 @@ add_subdirectory(lib)
 
 if(DECO_ENABLE_CUDA)
     enable_language(CUDA)
+    find_package(CUDAToolkit REQUIRED)
     set(CMAKE_CUDA_STANDARD 17)
     add_subdirectory(lib/algorithms/expander_decomposition/cuda/internal)
 endif()

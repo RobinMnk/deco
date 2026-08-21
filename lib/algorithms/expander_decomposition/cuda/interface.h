@@ -5,7 +5,6 @@
 #ifndef PAREX_INTERFACE_H
 #define PAREX_INTERFACE_H
 
-#include "core/graph.h"
 #include "algorithms/expander_decomposition/cuda/types.h"
 #include <memory>
 

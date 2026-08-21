@@ -6,8 +6,12 @@
 #define RCUT_EXPANDER_DECOMPOSITION_CUDA_TYPES_H
 
 #include "core/definitions.h"
+#include "core/graph.h"
+
 #include <cstdint>
 #include <vector>
+
+using Graph = CsrGraph<>;
 
 using label_t = int32_t;
 
