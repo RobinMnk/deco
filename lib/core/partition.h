@@ -218,7 +218,7 @@ Partition<Graph>::Partition(Graph& gr) :
     clusters[0] = {volume, volume, 0, gr.numNodes, this};
 
     std::vector<NodeIx> mod; // a bit ugly
-    // consolidate(0, mod);
+    consolidate(0, mod);
 }
 
 template<MutableGraph Graph>
