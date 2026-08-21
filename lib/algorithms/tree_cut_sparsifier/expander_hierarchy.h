@@ -266,6 +266,8 @@ void ExpanderHierarchy<EdgeWeight>::buildUpperLevels(Decomposer&& decompose, Con
     Timer t;
 
     while(current->numNodes > 1) {
+        if (current->numEdges == 0) break;
+
         t.start();
         Partition ed = decompose(*current, conf);
 
@@ -284,6 +286,11 @@ void ExpanderHierarchy<EdgeWeight>::buildUpperLevels(Decomposer&& decompose, Con
 
         auto timeSpent = t.timeSeconds();
         WARN("Level " << levels.size() << " (" << timeSpent << "s)\t\t-> " << numClusters << " clusters with " << cutSize << " crossing edges of weight " << ed.getCutSize());
+
+        if (ed.getCutSize() == EdgeWeight{}) {
+            // TODO: add single super node on top
+            break;
+        }
     }
 
     complete = true;
