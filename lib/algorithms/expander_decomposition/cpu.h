@@ -10,25 +10,17 @@
 #include "random_walk.h"
 
 #include <numeric>
-#include <bit>
-
 
 namespace expander_decomposition {
 
-    inline double fast_approx_sqrt(int64_t val) {
-        if (val <= 1) return 1.0;
-        int msb = std::bit_width(static_cast<uint64_t>(val)) - 1;
-        return static_cast<double>(1ULL << (msb / 2));
-    }
-
     template<MutableGraph GraphT>
     bool isConverged(const Cluster<GraphT>& cluster, double potential, const Config& config) {
-        return potential <= 1e-4; // config.randomWalkThreshold * std::max(std::bit_width(cluster.internalVolume), 1);
+        return potential <= 1e-2; // 1 / std::sqrt(cluster.internalVolume);
     }
 
     template<MutableGraph GraphT>
     bool isSparse(const Cluster<GraphT>& cluster, double sparsity, const Config& config) {
-        return sparsity < 0.3; // config.targetSparsity * std::max(std::bit_width(cluster.internalVolume), 1);
+        return sparsity < config.targetSparsity; // * std::sqrt(cluster.internalVolume);
     }
 
 
@@ -58,11 +50,16 @@ namespace expander_decomposition {
 
         while(!next.empty()) {
             std::swap(active, next);
-            next.clear(); // can be replaced by custom queue with lazy delete
+            next.clear();
 
             size_t rw = numSteps;
             while (rw--) walk.iterate(decomposition, active);
             auto& values = walk.values();
+
+            // for (NodeIx cid: active) {
+            //     const Cluster<Graph>& cluster = decomposition.getCluster(cid);
+            //     printf("Cluster %d:\n  potential: %f\n", cid, walk.L2potential(cluster));
+            // }
 
             while(!active.empty()) {
                 NodeIx clusterId = active.back();
@@ -80,8 +77,8 @@ namespace expander_decomposition {
                 LOG("  working on cluster " << clusterId << "\t (" << current.size() << " nodes, potential: " << walk.potential(current) << ")");
 
                 if constexpr (!strategy.cutWhenConverged) {
-                    if(walk.potential(current) < config.randomWalkThreshold) {
-                    // if (isConverged(current, walk.potential(current), config)) {
+                    // if(walk.potential(current) < config.randomWalkThreshold) {
+                    if (isConverged<Graph>(current, walk.L2potential(current), config)) {
                         LOG("       -> potential sufficiently low -> certified expander");
                         continue;
                     }
@@ -91,8 +88,8 @@ namespace expander_decomposition {
 
                 LOG("     Sweep cut:   sparsity=" << sweepCut.sparsity << ", offset=" << sweepCut.offset);
 
-                // if(isSparse(current, sweepCut.sparsity, config)) {
-                if(sweepCut.sparsity <= config.targetSparsity) {
+                if(isSparse<Graph>(current, sweepCut.sparsity, config)) {
+                // if(sweepCut.sparsity <= config.targetSparsity) {
                     LOG("       -> considered sparse -> cutting");
                     std::vector<NodeIx> modified{clusterId};
                     decomposition.template split<false, true>(clusterId, sweepCut.offset, modified);
@@ -103,7 +100,7 @@ namespace expander_decomposition {
                         const Cluster<Graph> &cl = decomposition.getCluster(clx);
                         if (cl.size() < 2 || cl.internalVolume == 0) continue;
                         frac_t potential;
-                        if constexpr (strategy.crs == Strategy::RECENTER)  potential = walk.recenterCluster(cl);
+                        if constexpr (strategy.crs == Strategy::RECENTER)  potential = walk.recenterClusterL2(cl);
                         if constexpr (strategy.crs == Strategy::RESET)     potential = walk.resetCluster(cl);
 
                         if constexpr (strategy.cutWhenConverged) {
@@ -127,8 +124,8 @@ namespace expander_decomposition {
                     }
                 } else {
                     if constexpr (strategy.cutWhenConverged) {
-                        // if(!isConverged(current, walk.potential(current), config)) {
-                        if(walk.potential(current) > config.randomWalkThreshold) {
+                        if(!isConverged<Graph>(current, walk.potential(current), config)) {
+                        // if(walk.potential(current) > config.randomWalkThreshold) {
                             next.push_back(clusterId);
                         } else {
                             LOG("       -> potential sufficiently low -> certified expander");

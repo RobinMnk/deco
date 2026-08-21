@@ -7,6 +7,8 @@
 
 #include <cassert>
 #include <cstdint>
+#include <bit>
+#include <cmath>
 
 #ifdef DEBUG
 #include <iostream>

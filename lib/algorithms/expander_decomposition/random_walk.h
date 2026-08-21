@@ -17,7 +17,6 @@ inline thread_local std::mt19937 random_source{1};
 template<MutableGraph Graph>
 class RandomWalk {
 
-    // TODO: make std::vector -> better for sparse active nodes!!
     std::vector<frac_t> m_distribution;
     std::vector<frac_t> m_old_distribution;
 
@@ -50,8 +49,8 @@ public:
             avg += (x - avg) / (static_cast<frac_t >(i) + 1.0f);
         }
 
-        for (size_t i = 0; i < m_distribution.size(); i++) {
-            m_distribution[i] -= avg;
+        for (frac_t& i : m_distribution) {
+            i -= avg;
         }
     }
 
@@ -107,6 +106,7 @@ public:
         }
     }
 
+    [[nodiscard]]
     const std::vector<frac_t>& values() const {
         return m_distribution;
     }
@@ -121,6 +121,16 @@ public:
         }
 
         return max - min;
+    }
+
+    frac_t L2potential(const Cluster<Graph>& cluster) {
+        frac_t pot = 0.0;
+
+        for (const ClusterVertex<Graph>& cv: cluster) {
+            pot += m_distribution[cv.nix] * m_distribution[cv.nix];
+        }
+
+        return std::sqrt(pot);
     }
 
     void recenterClusterF(const Cluster<Graph>& cluster) {
@@ -158,6 +168,27 @@ public:
         }
 
         return max - min;
+    }
+
+
+    frac_t recenterClusterL2(const Cluster<Graph>& cluster) {
+        frac_t avg = 0.0;
+        int i = 1;
+
+        for (const ClusterVertex<Graph>& cn: cluster) {
+            auto x = m_distribution[cn.nix];
+            avg += (x - avg) / static_cast<frac_t >(i);
+            i++;
+        }
+
+        frac_t pot = 0.0;
+
+        for (const ClusterVertex<Graph>& cv: cluster) {
+            m_distribution[cv.nix] -= avg;
+            pot += m_distribution[cv.nix] * m_distribution[cv.nix];
+        }
+
+        return std::sqrt(pot);
     }
 
     frac_t averageOf(const Cluster<Graph>& cluster) const {

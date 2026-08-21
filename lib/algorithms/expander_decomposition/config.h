@@ -18,7 +18,7 @@ struct Strategy {
 
 // Configuration for Expander Decomposition
 struct Config {
-    frac_t targetSparsity = 0.3;
+    frac_t targetSparsity = 0.005;
     frac_t randomWalkThreshold = 1e-4;
     size_t initialNumSteps = 1; // initial number of rw steps, before the first sweep cut is made
     size_t mainNumSteps = 1;
