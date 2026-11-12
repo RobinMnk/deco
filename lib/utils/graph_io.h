@@ -18,7 +18,7 @@
 
 using AnyGraph = std::variant<
     CsrGraph<>,
-    CsrGraph<int_t>,
+    CsrGraph<IntWeight>,
     CsrGraph<frac_t>
 >;
 
@@ -175,7 +175,7 @@ inline AnyGraph load_mtx_dynamic(const std::string& filepath) {
             return dg.finalize();
         }
         case MtxValueType::Integer: {
-            DynamicGraph<int_t> dg = read_mtx_dynamic_impl<int_t>(file, header);
+            DynamicGraph<IntWeight> dg = read_mtx_dynamic_impl<IntWeight>(file, header);
             return dg.finalize();
         }
     }

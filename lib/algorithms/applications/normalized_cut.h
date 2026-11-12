@@ -56,34 +56,47 @@ class NormalizedCut {
     }
 
     /**
-     * Traverse hierarchy from tn downwards, find the edge minimizing the cutting-penalty, assign each graph node the correct label
+     * Traverse hierarchy from tn downwards, find the edge minimizing the cutting-penalty
      */
-    Candidate getCandidate(const TreeNode& tn, NodeIx label, EdgeWeight clusterCutSize, EdgeWeight clusterVolume) {
+    Candidate getCandidate(const TreeNode& tn, EdgeWeight clusterCutSize, EdgeWeight clusterVolume) {
         Candidate bestCandidate{TreeNode{0, 0}, 100000};
 
+        if (tn.level == 0) return bestCandidate;
+
+        for (NodeIx childIx : hierarchy->children(tn.level, tn.nix)) {
+            const TreeNode child{tn.level - 1, childIx};
+
+            if (roots.contains(child)) continue; // O(log k)
+
+            if (volume(child) < clusterVolume) {
+                frac_t edgePen = edgePenalty(child, clusterCutSize, clusterVolume);
+                if (edgePen < bestCandidate.penalty) {
+                    bestCandidate = {child, edgePen};
+                }
+            }
+
+            Candidate cd = getCandidate(child, clusterCutSize, clusterVolume);
+            if (cd.penalty < bestCandidate.penalty) {
+                bestCandidate = cd;
+            }
+        }
+
+        return bestCandidate;
+    }
+
+    /**
+     * Assign label to all graph nodes below tn, skipping subtrees that are roots of other clusters
+     */
+    void assignLabels(const TreeNode& tn, NodeIx label) {
         for (NodeIx childIx : hierarchy->children(tn.level, tn.nix)) {
             if (tn.level == 0) {
                 labels[childIx] = label;
             } else {
                 const TreeNode child{tn.level - 1, childIx};
-
                 if (roots.contains(child)) continue; // O(log k)
-
-                if (volume(child) < clusterVolume) {
-                    frac_t edgePen = edgePenalty(child, clusterCutSize, clusterVolume);
-                    if (edgePen < bestCandidate.penalty) {
-                        bestCandidate = {child, edgePen};
-                    }
-                }
-
-                Candidate cd = getCandidate(child, label, clusterCutSize, clusterVolume);
-                if (cd.penalty < bestCandidate.penalty) {
-                    bestCandidate = cd;
-                }
+                assignLabels(child, label);
             }
         }
-
-        return bestCandidate;
     }
 
     void split(const TreeNode& tn) {
@@ -98,6 +111,11 @@ class NormalizedCut {
             NodeIx parent = hierarchy->lvl(lvlIdx).parents[child];
             hierarchy->subtractVolume(lvlIdx, parent, volA);
             hierarchy->addCut(lvlIdx, parent, cutA);
+
+            // tn belongs to the cluster of its nearest root ancestor. Ancestors above that root no longer
+            // contain this cluster (its volume was already subtracted when the root was split off) -> stop here.
+            // The top-level node is always a root, so the loop terminates there at the latest.
+            if (roots.contains(TreeNode{lvlIdx, parent})) break;
 
             child = parent;
         }
@@ -114,16 +132,16 @@ public:
     Partition<Graph> compute(Graph& G, NodeIx k) {
         roots.emplace(hierarchy->height() - 1, 0);
 
-        for (NodeIx i = 1; i <= k; ++i) {
+        // every split adds one cluster -> k-1 splits for k clusters
+        for (NodeIx i = 1; i < k; ++i) {
             Candidate bestCandidate{TreeNode{0, 0}, 1000};
-            NodeIx rootIx = 0;
             frac_t bestDelta = 100000;
 
             for (const TreeNode& root : roots) {
                 EdgeWeight rootVol = volume(root);
                 EdgeWeight rootCutSize = cutSize(root);
 
-                Candidate cd = getCandidate(root, rootIx, rootCutSize, rootVol);
+                Candidate cd = getCandidate(root, rootCutSize, rootVol);
                 frac_t rootBias = static_cast<frac_t>(rootCutSize) / static_cast<frac_t>(rootVol);
                 frac_t delta = cd.penalty - rootBias;
 
@@ -132,11 +150,15 @@ public:
                     bestCandidate = cd;
                 }
 
-                ++rootIx;
             }
 
             split(bestCandidate.tn);
             roots.insert(bestCandidate.tn);
+        }
+
+        NodeIx label = 0;
+        for (const TreeNode& root : roots) {
+            assignLabels(root, label++);
         }
 
         Partition<Graph> part{G};

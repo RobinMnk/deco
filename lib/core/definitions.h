@@ -25,7 +25,7 @@
 using NodeIx        = uint32_t;
 using EdgeIx        = uint32_t;
 using frac_t        = double;
-using int_t         = int64_t;
+using IntWeight     = int64_t;
 
 inline unsigned int randSeed{11};
 

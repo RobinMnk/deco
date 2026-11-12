@@ -22,7 +22,7 @@
 
 
 struct Unweighted {
-    using weight_type = int_t;
+    using weight_type = EdgeIx;
 
     constexpr Unweighted() noexcept = default;
     constexpr explicit Unweighted(EdgeIx) noexcept {}

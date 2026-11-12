@@ -29,7 +29,7 @@ void run(GraphT& G) {
     using EdgeWeight = typename GraphT::EdgeWeight;
     constexpr std::string_view weightType =
         std::same_as<GraphT, CsrGraph<>> ? "unweighted" :
-        std::same_as<EdgeWeight, int_t>  ? "int_t" :
+        std::same_as<EdgeWeight, IntWeight> ? "IntWeight" :
         std::same_as<EdgeWeight, frac_t> ? "frac_t" :
                                            "unknown";
 

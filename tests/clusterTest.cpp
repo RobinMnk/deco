@@ -55,13 +55,13 @@ TEST(PartitionTest, FullUnweightedPartitionIsConsistent) {
 }
 
 TEST(PartitionTest, WeightedSplitTracksCutSizeAndVolumes) {
-    DynamicGraph<int_t> graph{4, 5};
+    DynamicGraph<IntWeight> graph{4, 5};
     graph.addEdge(0, 1, 2);
     graph.addEdge(1, 2, 3);
     graph.addEdge(0, 2, 5);
     graph.addEdge(2, 3, 7);
     graph.addEdge(0, 3, 11);
-    CsrGraph<int_t> csr = graph.finalize();
+    CsrGraph<IntWeight> csr = graph.finalize();
 
     Partition partition{csr};
     std::vector<NodeIx> labels{0, 0, 1, 1};
@@ -74,8 +74,8 @@ TEST(PartitionTest, WeightedSplitTracksCutSizeAndVolumes) {
     EXPECT_EQ(partition.getNumCutEdges(), 3);
     EXPECT_EQ(partition.getCutSize(), 19);
 
-    const Cluster<CsrGraph<int_t>>& left = partition.getCluster(modified[0]);
-    const Cluster<CsrGraph<int_t>>& right = partition.getCluster(modified[1]);
+    const Cluster<CsrGraph<IntWeight>>& left = partition.getCluster(modified[0]);
+    const Cluster<CsrGraph<IntWeight>>& right = partition.getCluster(modified[1]);
 
     EXPECT_EQ(left.volume + right.volume, 56);
     EXPECT_EQ(left.internalVolume + right.internalVolume + 2 * partition.getCutSize(), 56);

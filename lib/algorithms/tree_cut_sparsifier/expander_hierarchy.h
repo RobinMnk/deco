@@ -172,6 +172,7 @@ public:
     }
 
     void subtractVolume(NodeIx l, NodeIx nix, EdgeWeight vol) {
+        assert(vol <= levels[l].volumes[nix] && "volume would become negative");
         levels[l].volumes[nix] -= vol;
     }
 

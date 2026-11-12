@@ -19,12 +19,12 @@ TEST(GraphTest, UnweightedDynamicGraphFinalizesToCsr) {
 }
 
 TEST(GraphTest, WeightedDynamicGraphComputesWeightedDegrees) {
-    DynamicGraph<int_t> graph{3, 3};
+    DynamicGraph<IntWeight> graph{3, 3};
     graph.addEdge(0, 1, 2);
     graph.addEdge(1, 2, 3);
     graph.addEdge(0, 2, 5);
 
-    CsrGraph<int_t> csr = graph.finalize();
+    CsrGraph<IntWeight> csr = graph.finalize();
 
     EXPECT_EQ(csr.numNodes, 3);
     EXPECT_EQ(csr.numEdges, 3);
