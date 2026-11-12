@@ -308,7 +308,7 @@ void CudaDeviceManager::Impl::expanderDecomposition() {
 
     // int walkReset = 128;
 
-    std::cout << "Begin Expander Decomposition" << std::endl;
+    std::cout << "Begin CUDA Expander Decomposition" << std::endl;
     Timer t;
     t.start();
     while (i++ < MAX_NUM_ITER && pt->numActiveClusters > 0 && pt->numActiveNodes > 0) {

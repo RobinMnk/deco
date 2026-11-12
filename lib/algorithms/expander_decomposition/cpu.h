@@ -39,6 +39,7 @@ namespace expander_decomposition {
         }
 
         size_t numSteps = config.initialNumSteps;
+        size_t iterations = 0;
 
         // constexpr std::string_view weightType =
         //     std::same_as<Graph, CsrGraph<>> ? "unweighted" :
@@ -51,6 +52,8 @@ namespace expander_decomposition {
         while(!next.empty()) {
             std::swap(active, next);
             next.clear();
+
+            iterations++;
 
             size_t rw = numSteps;
             while (rw--) walk.iterate(decomposition, active);
@@ -136,6 +139,8 @@ namespace expander_decomposition {
                 }
             }
         }
+
+        printf("iterations: %llu\n", iterations);
 
         return decomposition;
     }
