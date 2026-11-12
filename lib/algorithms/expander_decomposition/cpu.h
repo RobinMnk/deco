@@ -78,7 +78,7 @@ namespace expander_decomposition {
 
                 if constexpr (!strategy.cutWhenConverged) {
                     // if(walk.potential(current) < config.randomWalkThreshold) {
-                    if (isConverged<Graph>(current, walk.L2potential(current), config)) {
+                    if (isConverged<Graph>(current, walk.potential(current), config)) {
                         LOG("       -> potential sufficiently low -> certified expander");
                         continue;
                     }
@@ -100,7 +100,7 @@ namespace expander_decomposition {
                         const Cluster<Graph> &cl = decomposition.getCluster(clx);
                         if (cl.size() < 2 || cl.internalVolume == 0) continue;
                         frac_t potential;
-                        if constexpr (strategy.crs == Strategy::RECENTER)  potential = walk.recenterClusterL2(cl);
+                        if constexpr (strategy.crs == Strategy::RECENTER)  potential = walk.recenterCluster(cl);
                         if constexpr (strategy.crs == Strategy::RESET)     potential = walk.resetCluster(cl);
 
                         if constexpr (strategy.cutWhenConverged) {

@@ -21,9 +21,9 @@
 
 struct NormalDistributionFunctor {
     unsigned int base_seed{10};
-    const NodeIx* degrees{nullptr};
+    const EdgeIx* degrees{nullptr};
 
-    explicit NormalDistributionFunctor(unsigned int s, const NodeIx* degs) : base_seed(s), degrees(degs) {}
+    explicit NormalDistributionFunctor(unsigned int s, const EdgeIx* degs) : base_seed(s), degrees(degs) {}
 
     __device__
     unsigned int hash_idx(unsigned int x) const {
@@ -507,7 +507,7 @@ private:
     // }
 
     void initRandomWalk(GraphManager& gm, unsigned int s) {
-        const NodeIx* degreesPtr = thrust::raw_pointer_cast(gm.getDegrees().data());
+        const EdgeIx* degreesPtr = thrust::raw_pointer_cast(gm.getDegrees().data());
 
         thrust::transform(
             thrust::device,

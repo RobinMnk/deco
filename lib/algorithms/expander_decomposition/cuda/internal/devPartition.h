@@ -11,6 +11,7 @@
 #include <thrust/sort.h>
 #include <thrust/unique.h>
 #include <thrust/host_vector.h>
+#include <thrust/transform_reduce.h>
 #include "utils/timer.h"
 
 struct InitFunctor {
@@ -85,7 +86,7 @@ void disableEdgesKernel_node(
     NodeIx* __restrict__ neighbors,
     const EdgeIx* __restrict__ ranges,
     const EdgeIx* __restrict__ degrees,
-    NodeIx* __restrict__ internalDegrees
+    EdgeIx* __restrict__ internalDegrees
 ) {
     const size_t warpId = (blockIdx.x * blockDim.x + threadIdx.x) / WARP;
     const size_t lane   = threadIdx.x & WARPMASK;
@@ -122,7 +123,7 @@ void disableEdgesKernel_node(
         return;
     }
 
-    NodeIx deg = 0;
+    EdgeIx deg = 0;
     for (EdgeIx j = start + lane; j < end; j += WARP) {
         const NodeIx nb = __ldg(&neighbors[j]);
         if (nb == INVALID_EDGE) continue;
@@ -224,6 +225,18 @@ struct SweepCutClusterLess {
     }
 };
 
+struct ActiveNodeDegreeLookupOp {
+    const EdgeIx* degrees;
+
+    __host__ __device__
+    explicit ActiveNodeDegreeLookupOp(const EdgeIx* degs) : degrees(degs) {}
+
+    __host__ __device__
+    uint64_t operator()(const LabeledNode node) const {
+        return node.clusterId >= 0 ? static_cast<uint64_t>(degrees[node.nix]) : 0;
+    }
+};
+
 class PartitionManager {
     NodeIx numNodes;
     EdgeIx totalEdges;
@@ -293,7 +306,7 @@ public:
         //     InitFunctor(thrust::raw_pointer_cast(gm.getRanges().data()))
         // );
         auto& ranges = gm.getRanges();
-        thrust::transform(ranges.begin() + 1, ranges.end(), ranges.begin(), allInternalDegrees.begin(), thrust::minus<NodeIx>());
+        thrust::transform(ranges.begin() + 1, ranges.end(), ranges.begin(), allInternalDegrees.begin(), thrust::minus<EdgeIx>());
 
 
         const EdgeIx* rangesPtr = thrust::raw_pointer_cast(gm.getRanges().data());
@@ -506,7 +519,7 @@ public:
         const EdgeIx* degreesPtr = thrust::raw_pointer_cast(gm.getDegrees().data());
         const LabeledNode* nodes = thrust::raw_pointer_cast(activeNodes.data());
         const label_t* labelsPtr = thrust::raw_pointer_cast(allLabels.data());
-        NodeIx* internalDegsPtr = thrust::raw_pointer_cast(allInternalDegrees.data());
+        EdgeIx* internalDegsPtr = thrust::raw_pointer_cast(allInternalDegrees.data());
 
         const size_t gridSize = getGridSizeWarpParallel(numActiveNodes);
 
@@ -519,6 +532,37 @@ public:
             degreesPtr,
             internalDegsPtr
         );
+    }
+
+    void compactGraphIfUseful(GraphManager& gm) {
+        constexpr uint64_t minScannedDirectedEdgesForCompaction = 1'000'000;
+        constexpr uint64_t compactionWasteFactor = 2;
+
+        const uint64_t scannedDirectedEdges = thrust::transform_reduce(
+            thrust::device,
+            activeNodes.begin(),
+            activeNodes.begin() + numActiveNodes,
+            ActiveNodeDegreeLookupOp(thrust::raw_pointer_cast(gm.getDegrees().data())),
+            uint64_t{0},
+            thrust::plus<uint64_t>()
+        );
+
+        if (scannedDirectedEdges < minScannedDirectedEdgesForCompaction) {
+            return;
+        }
+
+        const uint64_t liveDirectedEdges = thrust::transform_reduce(
+            thrust::device,
+            activeNodes.begin(),
+            activeNodes.begin() + numActiveNodes,
+            ActiveNodeDegreeLookupOp(thrust::raw_pointer_cast(allInternalDegrees.data())),
+            uint64_t{0},
+            thrust::plus<uint64_t>()
+        );
+
+        if (liveDirectedEdges * compactionWasteFactor < scannedDirectedEdges) {
+            gm.compactActiveEdges(activeNodes, numActiveNodes, allInternalDegrees);
+        }
     }
 
     std::vector<int> getActiveEdgeMap(GraphManager& gm) const {

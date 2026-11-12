@@ -11,6 +11,7 @@
 #include <thrust/reduce.h>
 #include <thrust/fill.h>
 #include <thrust/scatter.h>
+#include <thrust/scan.h>
 
 #include "core/graph.h"
 #include "types.h"
@@ -84,11 +85,55 @@
 //}
 
 
+__global__
+void scatterActiveDegreeCountsKernel(
+    const NodeIx numActiveNodes,
+    const LabeledNode* __restrict__ activeNodes,
+    const EdgeIx* __restrict__ internalDegrees,
+    EdgeIx* __restrict__ newRanges
+) {
+    const NodeIx i = blockIdx.x * blockDim.x + threadIdx.x;
+    if (i >= numActiveNodes) return;
+
+    const LabeledNode node = activeNodes[i];
+    if (node.clusterId < 0) return;
+
+    newRanges[node.nix + 1] = internalDegrees[node.nix];
+}
+
+__global__
+void compactActiveEdgesKernel(
+    const NodeIx numActiveNodes,
+    const LabeledNode* __restrict__ activeNodes,
+    const NodeIx* __restrict__ oldNeighbors,
+    const EdgeIx* __restrict__ oldRanges,
+    const EdgeIx* __restrict__ oldDegrees,
+    const EdgeIx* __restrict__ newRanges,
+    NodeIx* __restrict__ newNeighbors
+) {
+    const NodeIx i = blockIdx.x * blockDim.x + threadIdx.x;
+    if (i >= numActiveNodes) return;
+
+    const LabeledNode node = activeNodes[i];
+    if (node.clusterId < 0) return;
+
+    EdgeIx out = newRanges[node.nix];
+    const EdgeIx begin = oldRanges[node.nix];
+    const EdgeIx end = begin + oldDegrees[node.nix];
+
+    for (EdgeIx eix = begin; eix < end; ++eix) {
+        const NodeIx nb = oldNeighbors[eix];
+        if (nb != INVALID_EDGE) {
+            newNeighbors[out++] = nb;
+        }
+    }
+}
+
 class GraphManager {
     // Graph
     thrust::device_vector<NodeIx> neighbors;
-    const thrust::device_vector<EdgeIx> ranges;
-    thrust::device_vector<NodeIx> degrees;
+    thrust::device_vector<EdgeIx> ranges;
+    thrust::device_vector<EdgeIx> degrees;
 
     thrust::device_vector<NodeIx> nodeLookup;
 
@@ -132,7 +177,7 @@ public:
     //        edgeDeletionBuffer(2 * graph.numEdges),
     //        nodeUpdateBuffer(graph.numNodes)
     {
-        thrust::transform(ranges.begin() + 1, ranges.end(), ranges.begin(), degrees.begin(), thrust::minus<int>());
+        thrust::transform(ranges.begin() + 1, ranges.end(), ranges.begin(), degrees.begin(), thrust::minus<EdgeIx>());
 
         // populateNodeLookup(graph.numNodes, 2 * graph.numEdges);
         // std::cout << "Copied Graph to GPU. \t" << neighbors.size() / 2 << " edges copied" << std::endl;
@@ -158,8 +203,50 @@ public:
         return neighbors;
     }
 
-    thrust::device_vector<NodeIx>& getDegrees() {
+    thrust::device_vector<EdgeIx>& getDegrees() {
         return degrees;
+    }
+
+    [[nodiscard]] EdgeIx storedDirectedEdges() const {
+        return static_cast<EdgeIx>(neighbors.size());
+    }
+
+    void compactActiveEdges(
+        const thrust::device_vector<LabeledNode>& activeNodes,
+        NodeIx numActiveNodes,
+        const thrust::device_vector<EdgeIx>& internalDegrees
+    ) {
+        thrust::device_vector<EdgeIx> newRanges(n + 1, 0);
+
+        const size_t blocks = getGridSize(numActiveNodes);
+        scatterActiveDegreeCountsKernel<<<blocks, threads>>>(
+            numActiveNodes,
+            thrust::raw_pointer_cast(activeNodes.data()),
+            thrust::raw_pointer_cast(internalDegrees.data()),
+            thrust::raw_pointer_cast(newRanges.data())
+        );
+
+        thrust::inclusive_scan(
+            thrust::device,
+            newRanges.begin(),
+            newRanges.end(),
+            newRanges.begin()
+        );
+
+        thrust::device_vector<NodeIx> newNeighbors(neighbors.size(), INVALID_EDGE);
+        compactActiveEdgesKernel<<<blocks, threads>>>(
+            numActiveNodes,
+            thrust::raw_pointer_cast(activeNodes.data()),
+            thrust::raw_pointer_cast(neighbors.data()),
+            thrust::raw_pointer_cast(ranges.data()),
+            thrust::raw_pointer_cast(degrees.data()),
+            thrust::raw_pointer_cast(newRanges.data()),
+            thrust::raw_pointer_cast(newNeighbors.data())
+        );
+
+        neighbors.swap(newNeighbors);
+        ranges.swap(newRanges);
+        thrust::transform(ranges.begin() + 1, ranges.end(), ranges.begin(), degrees.begin(), thrust::minus<EdgeIx>());
     }
 
     // const thrust::device_vector<NodeIx> & getNodeLookup() const {

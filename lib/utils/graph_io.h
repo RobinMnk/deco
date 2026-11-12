@@ -140,6 +140,23 @@ DynamicGraph<Spec> read_mtx_dynamic_impl(std::ifstream& file, const MtxHeader& h
     return dg;
 }
 
+inline CsrGraph<> load_mtx_unweighted(const std::string& filepath) {
+    std::ifstream file(filepath);
+    if (!file.is_open()) {
+        throw std::runtime_error("Could not open file: " + filepath);
+    }
+
+    MtxHeader header = parse_mtx_header(file);
+    if (header.value_type != MtxValueType::Unweighted) {
+        throw std::runtime_error("MTX file is not unweighted");
+    }
+
+    DynamicGraph<> dg = read_mtx_dynamic_impl(file, header);
+    return dg.finalize();
+}
+
+
+
 inline AnyGraph load_mtx_dynamic(const std::string& filepath) {
     std::ifstream file(filepath);
     if (!file.is_open()) {

@@ -12,7 +12,10 @@ add_subdirectory(lib)
 if(DECO_ENABLE_CUDA)
     enable_language(CUDA)
     find_package(CUDAToolkit REQUIRED)
+    set(CMAKE_CUDA17_STANDARD_COMPILE_OPTION "--std=c++20")
+    set(CMAKE_CUDA17_EXTENSION_COMPILE_OPTION "--std=c++20")
     set(CMAKE_CUDA_STANDARD 17)
+    set(CMAKE_CUDA_STANDARD_REQUIRED ON)
     add_subdirectory(lib/algorithms/expander_decomposition/cuda/internal)
 endif()
 
@@ -34,6 +37,7 @@ if(DECO_BUILD_CLI)
             $<$<AND:$<CONFIG:Release>,$<CXX_COMPILER_ID:MSVC>>:
             /O2
             /Ob2
+            /fp:fast
             >
     )
 

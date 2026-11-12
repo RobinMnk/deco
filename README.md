@@ -1,6 +1,9 @@
 # Deco: Graph Decomposition Library
 
-Deco is a high-performance C++ library for computing graph decompositions based on **algorithms with provable guarantees**. 
+Deco is a high-performance C++ library for computing graph decompositions based on **algorithms with provable guarantees**.
+It provides scalable implementations for computing
+- **Expander Decompositions** and
+- **Tree Cut Sparsifiers** (i.e., Hierarchical Congestion Approximators)
 
 
 
@@ -15,7 +18,10 @@ Parex, the parallel expander decomposition algorithm in this repository, explore
 
 The implementation is based on:
 
-> Robin M&uuml;nk, "A Practical Parallel Algorithm for Expander Decompositions," in *Proceedings of the 38th ACM Symposium on Parallelism in Algorithms and Architectures* (SPAA '26), 2026, doi: [10.1145/3816782.3819180](https://doi.org/10.1145/3816782.3819180)
+> _**A Practical Parallel Algorithm for Expander Decompositions**_ \
+>  Robin M&uuml;nk \
+>  in *Proceedings of the 38th ACM Symposium on Parallelism in Algorithms and Architectures* (SPAA '26), 2026 \
+>  [10.1145/3816782.3819180](https://doi.org/10.1145/3816782.3819180)
 
 ## Why Deco?
 

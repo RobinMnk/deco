@@ -62,19 +62,20 @@ void run(GraphT& G) {
 
     Timer t;
     t.start();
-    auto expDec = buildExpanderHierarchy(G);
+    // auto expDec = buildExpanderHierarchy(G);
     // auto expDec = expander_decomposition::compute(G);
+    auto expDec = cudaExpanderDecomposition(G);
     auto millis = t.timeMillis();
 
     printf("time: %lldms\nnodes: %d\nedges: %d\n", millis, G.numNodes, G.numEdges);
 
-    t.start();
-    auto NC = NormalizedCut(expDec);
-    auto kPart = NC.compute(G, 16);
-    double ncVal = compute_normalized_cut(kPart);
-    millis = t.timeMillis();
-
-    printf("NC time: %lldms\nNC: %f\n", millis, ncVal);
+    // t.start();
+    // auto NC = NormalizedCut(expDec);
+    // auto kPart = NC.compute(G, 16);
+    // double ncVal = compute_normalized_cut(kPart);
+    // millis = t.timeMillis();
+    //
+    // printf("NC time: %lldms\nNC: %f\n", millis, ncVal);
 
     // printf("time: %lld\nnumClusters: %d\ncutEdges: %d\nnodes: %d\nedges: %d\n", millis, expDec.numClusters(), expDec.getNumCutEdges(), G.numNodes, G.numEdges);
     // std::cout << "Cut size: " << expDec.getCutSize() << std::endl;
@@ -91,10 +92,19 @@ int main(int argc, char* argv[]) {
     std::string filename = argv[1];
 
     auto G = load_mtx_dynamic(filename);
-
     std::visit([](auto& graph) {
         run(graph);
     }, G);
+
+    #ifdef DECO_ENABLE_CUDA
+    // auto G = load_mtx_unweighted(filename);
+    // auto part = cudaExpanderDecomposition(G);
+    #else
+    // auto G = load_mtx_dynamic(filename);
+    // std::visit([](auto& graph) {
+    //     run(graph);
+    // }, G);
+    #endif
 
 
     // ExpanderHierarchy eh{&G};

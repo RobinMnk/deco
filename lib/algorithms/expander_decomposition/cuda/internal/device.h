@@ -153,6 +153,7 @@ struct CudaDeviceManager::Impl {
 
 
         pt->disableEdges(*gm);
+        // pt->compactGraphIfUseful(*gm);
         // fflush(stdout);
 
         // inspect(gm->getNeighbors(), 2*gm->m);

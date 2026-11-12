@@ -27,7 +27,7 @@ using EdgeIx        = uint32_t;
 using frac_t        = double;
 using int_t         = int64_t;
 
-inline unsigned int randSeed{6582};
+inline unsigned int randSeed{11};
 
 constexpr double rw_stay = 0.1;
 inline frac_t rw_threshold = 1e-4;

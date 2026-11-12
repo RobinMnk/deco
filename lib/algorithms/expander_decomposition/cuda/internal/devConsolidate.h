@@ -172,7 +172,7 @@ inline void ConsolidationManager::consolidate(
     NodeIx numActiveNodes
 ) {
     const NodeIx* neighborsPtr = thrust::raw_pointer_cast(gm.getNeighbors().data());
-    const NodeIx* rangesPtr = thrust::raw_pointer_cast(gm.getRanges().data());
+    const EdgeIx* rangesPtr = thrust::raw_pointer_cast(gm.getRanges().data());
     const EdgeIx* degreesPtr = thrust::raw_pointer_cast(gm.getDegrees().data());
     label_t* labelsPtr = thrust::raw_pointer_cast(labels.data());
     NodeIx* parentsPtr = thrust::raw_pointer_cast(parentLabels.data());

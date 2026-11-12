@@ -8,7 +8,7 @@
 #include "core/partition.h"
 #include <random>
 
-inline thread_local std::mt19937 random_source{1};
+inline std::mt19937 random_source{11};
 
 
 // // const frac_t rw_stay = 0.1;
@@ -45,8 +45,7 @@ public:
             frac_t x = normal_distribution(random_source, stdev);
             m_distribution[i] = x;
 
-            // use welford mean algorithm to compute the average
-            avg += (x - avg) / (static_cast<frac_t >(i) + 1.0f);
+            avg += (x - avg) / (static_cast<frac_t >(i) + 1.0);
         }
 
         for (frac_t& i : m_distribution) {
