@@ -15,7 +15,7 @@ namespace expander_decomposition {
 
     template<MutableGraph GraphT>
     bool isConverged(const Cluster<GraphT>& cluster, double potential, const Config& config) {
-        return potential <= 1e-2; // 1 / std::sqrt(cluster.internalVolume);
+        return potential <= config.randomWalkThreshold; // 1 / std::sqrt(cluster.internalVolume);
     }
 
     template<MutableGraph GraphT>
@@ -40,14 +40,6 @@ namespace expander_decomposition {
 
         size_t numSteps = config.initialNumSteps;
         size_t iterations = 0;
-
-        // constexpr std::string_view weightType =
-        //     std::same_as<Graph, CsrGraph<>> ? "unweighted" :
-        //     std::same_as<typename Graph::EdgeWeight, int_t>  ? "int_t" :
-        //     std::same_as<typename Graph::EdgeWeight, frac_t> ? "frac_t" :
-        //                                        "unknown";
-        //
-        //     std::cout << "Starting Expander Decomposition: " << weightType << std::endl;
 
         while(!next.empty()) {
             std::swap(active, next);

@@ -70,9 +70,9 @@ int main(int argc, char* argv[]) {
 
     auto G2 = load_mtx_dynamic(filename);
 
-    std::visit([](auto& graph) {
-        test(graph);
-    }, G2);
+    // std::visit([](auto& graph) {
+    //     run(graph);
+    // }, G2);
 
     #ifdef DECO_ENABLE_CUDA
     auto G = load_mtx_unweighted(filename);

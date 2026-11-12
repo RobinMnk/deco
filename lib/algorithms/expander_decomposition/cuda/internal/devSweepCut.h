@@ -75,14 +75,15 @@ void nodeDiffKernel_Sparse_WarpParallel(
 
         if (nb == INVALID_EDGE) continue;
 
-        const label_t nbLabel   = __ldg(&labels[nb]);
         const double nbRwValue  = __ldg(&dist[nb]);
         // re-computing the key from scratch is much faster than trying to find and load the value from global memory
-        const uint64_t nbKey = packSweepKey(nbLabel, static_cast<float>(nbRwValue), nb);
+        const uint64_t nbKey = packSweepKey(static_cast<label_t>(myLabel), static_cast<float>(nbRwValue), nb);
 
-        if (nbLabel != myLabel) {
+#ifdef DEBUG
+        if (__ldg(&labels[nb]) != myLabel) {
             printf("ERROR: this edge should have been invalidated: %d -> %d [eix: %d]\n", nix, nb, j);
         }
+#endif
 
         bool isBefore;
         if (nbKey != myKey) {

@@ -152,7 +152,7 @@ struct CudaDeviceManager::Impl {
         // std::cout << std::endl;
 
 
-        pt->disableEdges(*gm);
+        pt->disableEdges(*gm, rw->getValues(), rw->getNormalizedValues());
         // pt->compactGraphIfUseful(*gm);
         // fflush(stdout);
 

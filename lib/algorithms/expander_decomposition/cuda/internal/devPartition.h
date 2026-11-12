@@ -86,7 +86,9 @@ void disableEdgesKernel_node(
     NodeIx* __restrict__ neighbors,
     const EdgeIx* __restrict__ ranges,
     const EdgeIx* __restrict__ degrees,
-    EdgeIx* __restrict__ internalDegrees
+    EdgeIx* __restrict__ internalDegrees,
+    const double* __restrict__ dist,
+    double* __restrict__ normDist
 ) {
     const size_t warpId = (blockIdx.x * blockDim.x + threadIdx.x) / WARP;
     const size_t lane   = threadIdx.x & WARPMASK;
@@ -143,6 +145,7 @@ void disableEdgesKernel_node(
 
     if (lane == 0) {
         internalDegrees[nix] = deg;
+        normDist[nix] = deg > 0 ? dist[nix] / static_cast<double>(deg) : 0.0;
     }
 }
 
@@ -513,7 +516,7 @@ public:
         // printf("There are %d clusters and the maximum label is %llu\n", numActiveClusters, maxLabel);
     }
 
-    void disableEdges(GraphManager& gm) {
+    void disableEdges(GraphManager& gm, const double* dist, double* normDist) {
         NodeIx* neighborsPtr = thrust::raw_pointer_cast(gm.getNeighbors().data());
         const EdgeIx* rangesPtr = thrust::raw_pointer_cast(gm.getRanges().data());
         const EdgeIx* degreesPtr = thrust::raw_pointer_cast(gm.getDegrees().data());
@@ -530,7 +533,9 @@ public:
             neighborsPtr,
             rangesPtr,
             degreesPtr,
-            internalDegsPtr
+            internalDegsPtr,
+            dist,
+            normDist
         );
     }
 

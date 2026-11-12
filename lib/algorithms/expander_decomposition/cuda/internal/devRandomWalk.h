@@ -124,6 +124,8 @@ void fusedRandomWalk_WarpParallel(
     const EdgeIx* __restrict__ clusterDegrees,
     const double* __restrict__ dist,
     double* __restrict__ new_dist,
+    const double* __restrict__ normDist,     // normDist[u] == dist[u] / clusterDegrees[u]
+    double* __restrict__ new_normDist,
     uint64_t* __restrict__ packedKeys
 ) {
     const size_t warpId = (blockIdx.x * blockDim.x + threadIdx.x) / WARP;
@@ -167,12 +169,13 @@ void fusedRandomWalk_WarpParallel(
 
         if (nb == INVALID_EDGE) continue; // this skips edges between different clusters
 
-        const EdgeIx nbDeg = __ldg(&clusterDegrees[nb]);
-        if (nbDeg <= 0) {
+#ifdef DEBUG
+        if (__ldg(&clusterDegrees[nb]) == 0) {
             printf("ERROR: degree should never be 0!!\t[nix = %d] edge from %d [eix=%d]\n", nb, nix, j);
-            continue;
         }
-        local_sum += __ldg(&dist[nb]) / static_cast<double>(nbDeg);
+#endif
+        // dist[nb] / clusterDegrees[nb] is precomputed in normDist -> a single gather per edge
+        local_sum += __ldg(&normDist[nb]);
     }
 
     // 3. Warp Reduction
@@ -188,6 +191,8 @@ void fusedRandomWalk_WarpParallel(
 
         // Update all data structures in one pass
         new_dist[nix] = nodeVal;
+        const EdgeIx myDeg = __ldg(&clusterDegrees[nix]);
+        new_normDist[nix] = myDeg > 0 ? nodeVal / static_cast<double>(myDeg) : 0.0;
         // nodeData[warpId].activeDegree = __ldg(&activeDegrees[nix]);
         // nodeData[warpId].label = myLabel;
         // nodeData[warpId].nix = nix;
@@ -337,10 +342,21 @@ void randomWalkStep(
 
 
 
+struct NormalizeByDegreeOp {
+    __host__ __device__
+    double operator()(const double x, const EdgeIx deg) const {
+        return deg > 0 ? x / static_cast<double>(deg) : 0.0;
+    }
+};
+
 class RandomWalkManager {
     thrust::device_vector<double> dist1;
     thrust::device_vector<double> dist2;
     cub::DoubleBuffer<double> dist;
+
+    thrust::device_vector<double> norm1;
+    thrust::device_vector<double> norm2;
+    cub::DoubleBuffer<double> normDist; // normDist[u] = dist[u] / internalDegree[u]
 
     NodeIx numNodes;
     void* d_temp_storage = nullptr;
@@ -352,6 +368,9 @@ public:
         dist1(gm.n), dist2(gm.n),
         dist(thrust::raw_pointer_cast(dist1.data()),
                thrust::raw_pointer_cast(dist2.data())),
+        norm1(gm.n), norm2(gm.n),
+        normDist(thrust::raw_pointer_cast(norm1.data()),
+                 thrust::raw_pointer_cast(norm2.data())),
         numNodes(gm.n)
     {
         initRandomWalk(gm, randSeed);
@@ -364,6 +383,10 @@ public:
 
     double* getValues() {
         return dist.Current();
+    }
+
+    double* getNormalizedValues() {
+        return normDist.Current();
     }
 
     void stepFast(
@@ -384,11 +407,14 @@ public:
             thrust::raw_pointer_cast(allInternalDegrees.data()),
             dist.Current(),
             dist.Alternate(),
+            normDist.Current(),
+            normDist.Alternate(),
             packedKeys.Current()
         );
         // fflush(stdout);
 
         dist.selector ^= 1;
+        normDist.selector ^= 1;
     }
 
 
@@ -515,6 +541,15 @@ private:
               thrust::make_counting_iterator(numNodes),
               dist.Current(),
               NormalDistributionFunctor(s, degreesPtr)
+        );
+
+        // initially, all edges are active -> internal degree == CSR degree
+        thrust::transform(
+            thrust::device,
+            dist.Current(), dist.Current() + numNodes,
+            degreesPtr,
+            normDist.Current(),
+            NormalizeByDegreeOp()
         );
     }
 };
