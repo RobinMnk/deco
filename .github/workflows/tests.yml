@@ -1,0 +1,71 @@
+name: Tests
+
+on:
+  push:
+    branches: [master]
+  workflow_dispatch:   # allows starting the workflow by hand from the Actions tab
+
+concurrency:
+  group: tests-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # All CPU tests, on Linux (GCC) and Windows (MSVC). Debug builds, so that assertions are active.
+  cpu:
+    name: CPU tests (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug -DDECO_ENABLE_CUDA=OFF
+
+      - name: Build
+        run: cmake --build build --config Debug --parallel
+
+      - name: Test
+        run: ctest --test-dir build -C Debug --output-on-failure
+
+  # Builds everything with CUDA enabled (CUDA code, CLI and CudaTest). GitHub-hosted runners have no GPU,
+  # so this checks that the CUDA code compiles and links, and runs only the CPU tests.
+  cuda-build:
+    name: CUDA build
+    runs-on: ubuntu-latest
+    container: nvidia/cuda:12.9.1-devel-ubuntu24.04
+    steps:
+      - name: Install build tools
+        run: apt-get update && apt-get install -y --no-install-recommends build-essential cmake git ca-certificates
+
+      - uses: actions/checkout@v4
+
+      - name: Configure
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug -DDECO_ENABLE_CUDA=ON
+
+      - name: Build
+        run: cmake --build build --parallel
+
+      - name: Test (without GPU tests)
+        run: ctest --test-dir build --output-on-failure -E '^Cuda'
+
+  # All tests including CudaTest, on a machine with an NVIDIA GPU and the CUDA toolkit.
+  # Needs a self-hosted runner with the labels "self-hosted", "linux" and "gpu", and is only run if the
+  # repository variable GPU_RUNNER is set to "true" (Settings > Secrets and variables > Actions > Variables).
+  cuda-tests:
+    name: CUDA tests
+    if: ${{ vars.GPU_RUNNER == 'true' }}
+    runs-on: [self-hosted, linux, gpu]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug -DDECO_ENABLE_CUDA=ON
+
+      - name: Build
+        run: cmake --build build --parallel
+
+      - name: Test
+        run: ctest --test-dir build --output-on-failure
