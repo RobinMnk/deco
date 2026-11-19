@@ -164,7 +164,8 @@ public:
         Partition<Graph> part{G};
         std::vector<NodeIx> mod;
         // This modifies the underlying graph, which invalidates the sparsifier.
-        part.template splitByIndices<false, false>(0, labels, k, mod);
+        // labels are not grouped by node order -> the cluster must be sorted by label (requiresSort = true)
+        part.template splitByIndices<true, false>(0, labels, k, mod);
         return part;
     }
 };

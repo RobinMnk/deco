@@ -120,11 +120,9 @@ void disableEdgesKernel_node(
 
     const EdgeIx end = start + degree;
 
-    if (myLabel < 0) {
-        // This can happen when nodes were just deactivated in this iteration, nothing to do here
-        // printf("ERROR: considering inactive node in disable edges kernel!\n");
-        return;
-    }
+    // Nodes deactivated in this iteration (negative label) are processed as well: this is the last time they are in
+    // activeNodes, so their cut edges must be disabled now. Labels of inactive clusters are unique, so edges within
+    // a deactivated cluster stay valid.
 
     EdgeIx deg = 0;
     for (EdgeIx j = start + lane; j < end; j += WARP) {
@@ -270,6 +268,7 @@ class PartitionManager {
 
 public:
     NodeIx totalClusters{1}, numActiveClusters{1};
+    label_t nextInactiveLabel{-1};   // labels of deactivated clusters count down from -1 and are never reused
     NodeIx numDisabledNodes{0}, numActiveNodes;
 
     Timer t, t2;
@@ -680,7 +679,7 @@ public:
         );
     }
 
-    void recenterAndDeactivateClusters(double* dist, const label_t* smallestLabel) {
+    void recenterAndDeactivateClusters(double* dist) {
         // subtract average from each (active) node
         const ClusterData* clusterDataPtr = thrust::raw_pointer_cast(clusterData.data());
         const label_t* uniqueLabelsPtr = thrust::raw_pointer_cast(clusterLabels.data());
@@ -691,6 +690,7 @@ public:
         const float walk_threshold = rw_threshold;
         const NodeIx numClusters = numActiveClusters;
         const NodeIx lookupSize = numNodes;
+        const label_t inactiveBase = nextInactiveLabel;
 
         auto keepFlags = thrust::make_transform_iterator(clusterData.begin(), KeepClusterFlagOp(walk_threshold));
         const label_t numSurvivingClusters = thrust::reduce(
@@ -712,7 +712,7 @@ public:
             thrust::device,
             activeNodes.begin(),
             numActiveNodes,
-            [clusterDataPtr, uniqueLabelsPtr, labelLookupPtr, clusterNewLabelsPtr, dist, allLabelsPtr, walk_threshold, smallestLabel, numClusters, lookupSize] __host__ __device__ (LabeledNode& lNode) {
+            [clusterDataPtr, uniqueLabelsPtr, labelLookupPtr, clusterNewLabelsPtr, dist, allLabelsPtr, walk_threshold, inactiveBase, numClusters, lookupSize] __host__ __device__ (LabeledNode& lNode) {
                 const label_t label = lNode.clusterId;
 
                 if (label < 0) {
@@ -744,8 +744,9 @@ public:
 
                 if (clusterPotential < walk_threshold || cd.totalElements < 2) {
                     // this cluster should be deactivated
-                    const label_t updatedLabel = *smallestLabel - index - 1;
-                    // printf("Deactivating cluster: %d -> %d \t smallest: %d\n", lNode.clusterId, updatedLabel, *smallestLabel);
+                    // clusterNewLabels is the exclusive scan of the keep flags, i.e., the number of kept clusters before
+                    // index -> index - clusterNewLabelsPtr[index] is the number of deactivated clusters before index
+                    const label_t updatedLabel = inactiveBase - (index - clusterNewLabelsPtr[index]);
                     lNode.clusterId = updatedLabel;
                     allLabelsPtr[lNode.nix] = updatedLabel;
                 } else {
@@ -758,6 +759,7 @@ public:
             }
         );
 
+        nextInactiveLabel -= static_cast<label_t>(numActiveClusters) - numSurvivingClusters;
         numActiveClusters = numSurvivingClusters;
 
         // printf("After\n");

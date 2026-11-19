@@ -23,7 +23,8 @@ Partition<GraphT> cudaExpanderDecomposition(GraphT& graph, const Config& = {}) {
     FinalPartition finalPartition = cuda.getFinalPartition();
     Partition<GraphT> partition{graph};
     std::vector<NodeIx> modified;
-    partition.template splitByIndices<false, false>(0, finalPartition.clusterIds, finalPartition.numClusters, modified);
+    // the GPU labels are not grouped by node order -> the cluster must be sorted by label (requiresSort = true)
+    partition.template splitByIndices<true, false>(0, finalPartition.clusterIds, finalPartition.numClusters, modified);
 
     printf("time: %lld\nnumClusters: %d\ncutEdges: %d\ncutWeight: %llu\nnodes: %d\nedges: %d\n", millis, partition.numClusters(), partition.getNumCutEdges(), static_cast<unsigned long long>(partition.getCutSize()), graph.numNodes, graph.numEdges);
 

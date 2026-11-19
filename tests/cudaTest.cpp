@@ -1,452 +1,428 @@
 //
-// Created by robin on 20.01.2026.
+// Chunk 2: CUDA consistency.
+//
+// Runs the GPU decomposition and checks it against host-side computations of the same quantities:
+// the uploaded graph, every random-walk step, every sweep cut, the state after cutting (labels, valid edges,
+// internal degrees), and the final partition. Tests run on unweighted graphs and on 32-bit weighted graphs
+// (the type of contracted hierarchy levels). All test graphs are connected and generated in code.
 //
 
 #include <gtest/gtest.h>
-#include "core/graph.h"
-#include "core/partition.h"
-#include "algorithms/expander_decomposition/random_walk.h"
-#include "algorithms/expander_decomposition/cuda/interface.h"
-#include "utils/graph_io.h"
-#include "utils/timer.h"
 
-constexpr auto filename = "../../graphs/mock.mtx";
+#include <algorithm>
+#include <cmath>
+#include <map>
+#include <set>
+#include <vector>
 
-class CudaTest : public ::testing::TestWithParam<int> {
-protected:
-    static Graph graph;
-    static CudaDeviceManager cuda;
+#include "testUtils.h"
+#include "algorithms/expander_decomposition/cuda.h"
+#include "algorithms/tree_cut_sparsifier/expander_hierarchy.h"
 
-    [[maybe_unused]] static void SetUpTestSuite() {
-        graph = readDynGraph(filename).finalize();
-        cuda.initialize(graph);
+using namespace testutil;
+
+template<class GraphT>
+class CudaTest : public ::testing::Test {};
+
+using CudaGraphTypes = ::testing::Types<Unweighted32, Weighted32>;
+TYPED_TEST_SUITE(CudaTest, CudaGraphTypes);
+
+
+namespace {
+
+/**
+ * `numClusters` cliques of `size` nodes (weights in [2, 6]), chained by one edge of weight 1 between consecutive
+ * cliques, plus up to `extraBridges` random weight-1 edges between different cliques. Connected.
+ */
+std::vector<WeightedEdge> plantedClusters(NodeIx numClusters, NodeIx size, NodeIx extraBridges, unsigned seed) {
+    std::mt19937 rng(seed);
+    std::uniform_int_distribution<uint32_t> weight(2, 6);
+    std::uniform_int_distribution<NodeIx> node(0, numClusters * size - 1);
+    std::set<std::pair<NodeIx, NodeIx>> seen;
+    std::vector<WeightedEdge> edges;
+
+    auto add = [&](NodeIx u, NodeIx v, uint32_t w) {
+        if (u > v) std::swap(u, v);
+        if (u != v && seen.insert({u, v}).second) edges.push_back({u, v, w});
+    };
+
+    for (NodeIx c = 0; c < numClusters; ++c)
+        for (NodeIx i = 0; i < size; ++i)
+            for (NodeIx j = i + 1; j < size; ++j)
+                add(c * size + i, c * size + j, weight(rng));
+
+    for (NodeIx c = 0; c + 1 < numClusters; ++c) add(c * size, (c + 1) * size + 1, 1);
+
+    for (NodeIx b = 0, tries = 0; b < extraBridges && tries < 100 * extraBridges; ++tries) {
+        const NodeIx u = node(rng), v = node(rng);
+        if (u / size == v / size) continue;
+        const size_t before = edges.size();
+        add(u, v, 1);
+        b += edges.size() > before;
     }
-
-    static void resetGraph() {
-        graph = readDynGraph(filename).finalize();
-        cuda.initialize(graph);
-    }
-};
-Graph CudaTest::graph{};
-CudaDeviceManager CudaTest::cuda{};
-
-TEST_F(CudaTest, UploadGraph) {
-    Graph G2 = cuda.downloadGraph();
-    ASSERT_EQ(graph, G2);
+    return edges;
 }
 
-TEST_F(CudaTest, Degrees) {
-    auto deg = cuda.downloadDegrees();
+bool isActive(int label) { return label >= 0; }
 
-    std::vector<EdgeIx> expected(graph.numNodes);
-    for(NodeIx nix = 0; nix < graph.numNodes; nix++) {
-        expected[nix] = graph.degree(nix);
-    }
-
-    ASSERT_EQ(deg, expected);
+bool anyActive(const std::vector<int>& labels) {
+    return std::any_of(labels.begin(), labels.end(), isActive);
 }
 
-TEST_P(CudaTest, RandomWalkTest) {
-    auto rwData = cuda.readRandomWalkValues();
+/**
+ * Splits a freshly constructed host Partition (single cluster, connected graph) into one cluster per distinct GPU
+ * label. Inactive clusters have negative labels. Returns label -> host cluster id.
+ */
+template<class GraphT>
+std::map<int, NodeIx> splitByLabels(Partition<GraphT>& partition, const std::vector<int>& labels) {
+    std::map<int, NodeIx> index;
+    EXPECT_EQ(partition.numClusters(), 1u) << "test graphs must be connected";
+    if (partition.numClusters() != 1) return index;
 
-    int numSteps = GetParam();
+    for (const int l : labels) index.emplace(l, 0);
+    NodeIx next = 0;
+    for (auto& [label, id] : index) id = next++;
 
-    RandomWalk rw(graph.numNodes);
-    rw.setData(rwData);
-    Partition part(&graph);
+    std::vector<NodeIx> parts(labels.size());
+    for (size_t v = 0; v < labels.size(); ++v) parts[v] = index.at(labels[v]);
 
-    for(int i = 0; i < numSteps; i++) {
-        rw.iterate(part, {0});
-        cuda.iterateRandomWalk();
-    }
+    // cluster 0 keeps part 0, part i becomes cluster i (no consolidation)
+    std::vector<NodeIx> modified;
+    partition.template splitByIndices<true, false>(0, parts, next, modified);
+    return index;
+}
 
-    auto y = cuda.readRandomWalkValues();
-    auto z = rw.values();
+/**
+ * One GPU random-walk step against the host: for every active node v,
+ *   x'[v] = rw_stay * x[v] + (1 - rw_stay) * sum over valid edges (v, u) of w(v, u) * x[u] / d[u],
+ * with the valid edges and internal degrees d taken from the GPU's current state.
+ */
+template<class GraphT>
+void expectWalkStepMatchesHost(CudaDeviceManager& cuda, const GraphT& graph) {
+    const auto labels = cuda.downloadLabels();
+    const auto valid = cuda.downloadActiveEdgeMap();
+    const auto degrees = cuda.downloadDegrees();
+    const auto x = cuda.readRandomWalkValues();
 
-    for(NodeIx nix = 0; nix < graph.numNodes; nix++) {
-        EXPECT_NEAR(y[nix], z[nix], 0.00001);
+    cuda.iterateRandomWalk();
+    const auto gpu = cuda.readRandomWalkValues();
+
+    int mismatches = 0;
+    for (NodeIx v = 0; v < graph.numNodes && mismatches < 10; ++v) {
+        if (!isActive(labels[v])) continue;   // the GPU does not update inactive nodes
+
+        double sum = 0.0;
+        for (EdgeIx eix = graph.startIndex(v); eix < graph.endIndex(v); ++eix) {
+            if (!valid[eix]) continue;
+            const NodeIx u = graph.edges[eix];
+            if (degrees[u] > 0) sum += static_cast<double>(graph.edgeWeight(eix)) * x[u] / static_cast<double>(degrees[u]);
+        }
+        const double expected = rw_stay * x[v] + (1.0 - rw_stay) * sum;
+
+        // the GPU sums in a different order (warp reduction), so allow for rounding
+        if (std::abs(gpu[v] - expected) > 1e-9 * (1.0 + std::abs(expected))) {
+            ADD_FAILURE() << "walk value of node " << v << ": GPU " << gpu[v] << ", host " << expected;
+            ++mismatches;
+        }
     }
 }
 
-INSTANTIATE_TEST_SUITE_P(
-    Iterations,
-    CudaTest,
-    // testing::Values(6)
-    testing::Values(0, 1, 2, 4, 8, 16, 64, 128, 256, 512)
-);
-
-
-TEST_F(CudaTest, SweepCutTest) {
-    auto rwData = cuda.readRandomWalkValues();
-    RandomWalk rw(graph.numNodes);
-    rw.setData(rwData);
-    Partition part(&graph);
-
-    // take 20 steps
-    for(int i = 0; i < 20; i++) {
-        rw.iterate(part, {0});
-        cuda.iterateRandomWalk();
-    }
-
-    // confirm active degrees
-    auto deg = cuda.downloadDegrees();
-    for(const ClusterVertex& cv: part.getCluster(0)) {
-        ASSERT_EQ(deg[cv.nix], cv.internalDegree);
-    }
-
-    // confirm random walk values
-    auto y = cuda.readRandomWalkValues();
-    auto z = rw.values();
-
-    for (NodeIx nix = 0; nix < graph.numNodes; nix++) {
-        ASSERT_NEAR(y[nix], z[nix], 0.00001) << "nix: " << nix;
-    }
-
-    // Sweep Cut
-    SweepCut expected = part.sweepCut(0, z);
-
+/**
+ * GPU sweep cuts against brute force on the host. The GPU orders the nodes of each cluster by the float value of
+ * their walk value; clusters with ties in that order are skipped, since the order is then ambiguous.
+ * The GPU reports per cluster the best sparsity and the prefix length (offset) where it cuts. Ties between equally
+ * sparse prefixes are allowed: the GPU's prefix only has to be one of the best.
+ * Returns the number of clusters compared.
+ */
+template<class GraphT>
+NodeIx expectSweepCutsMatchHost(CudaDeviceManager& cuda, const GraphT& graph) {
     cuda.computeSweepCuts();
-    AllSweepCuts result = cuda.readSweepCuts();
+    const AllSweepCuts gpu = cuda.readSweepCuts();
+    const auto labels = cuda.downloadLabels();
+    const auto values = cuda.readRandomWalkValues();
+    const std::vector<float> keys(values.begin(), values.end());
 
-    // std::vector<NodeData> pt = cuda.downloadPartition();
+    auto copy = copyGraph(graph);
+    Partition host{copy};
+    const auto index = splitByLabels(host, labels);
+    if (::testing::Test::HasFailure()) return 0;
 
-    NodeIx n = graph.numNodes;
+    std::set<int> activeLabels;
+    for (const int l : labels) if (isActive(l)) activeLabels.insert(l);
+    EXPECT_EQ(gpu.clusterIds.size(), activeLabels.size()) << "one sweep cut per active cluster";
 
-//    for(int j = 0; j < 20; j++) {
-//        std::cout << "CPU:  " << expected.pS[j].edgeDiff << " / " << expected.pS[j].vol << " (" << (static_cast<float>(expected.pS[j].edgeDiff) / expected.pS[j].vol) << ")" << "\t\t"
-//                << "GPU:  " << pt[j].prefixEdgeDiff << " / " << pt[j].prefixVolume << " (" << (static_cast<float>(pt[j].prefixEdgeDiff) / pt[j].prefixVolume) << ")" << std::endl;
-//    }
-
-//     for(int j = 0; j < n; j++) {
-// //        EXPECT_EQ(result.prefixSums[j].volume, expected.pS[j].volume);
-//         ASSERT_EQ(pt[j].label, 0);
-//         ASSERT_EQ(pt[j].nix, j);
-//     }
-
-//    std::cout << "cutting at index: " << result.cuts[0].offset << "\n compared to " << expected.offset << std::endl;
-
-//    EXPECT_EQ(expected.pS, result.prefixSums);
-
-    EXPECT_EQ(result.clusterIds.size(), 1);
-    EXPECT_EQ(result.cuts.size(), 1);
-
-    EXPECT_EQ(result.clusterIds[0], 0);
-
-//    EXPECT_EQ(result.offsets[0], expected.offset);
-    EXPECT_NEAR(result.cuts[0].sparsity, expected.sparsity, 0.0000001);
-}
-
-
-
-TEST_P(CudaTest, SweepCut) {
-    auto rwData = cuda.readRandomWalkValues();
-    RandomWalk rw(graph.numNodes);
-    rw.setData(rwData);
-    Partition part(&graph);
-
-    int numSteps = GetParam();
-
-    for(int i = 0; i < numSteps; i++) {
-        rw.iterate(part, {0});
-        cuda.iterateRandomWalk();
-
-        SweepCut expected = part.sweepCut(0, rw.values());
-
-        cuda.computeSweepCuts();
-        AllSweepCuts result = cuda.readSweepCuts();
-
-        EXPECT_EQ(result.clusterIds.size(), 1);
-        EXPECT_EQ(result.cuts.size(), 1);
-
-        EXPECT_EQ(result.clusterIds[0], 0);
-
-//        EXPECT_EQ(result.offsets[0], expected.offset);
-        EXPECT_NEAR(result.cuts[0].sparsity, expected.sparsity, 0.00000001);
-    }
-}
-
-std::vector<NodeIx> getLabels(const Graph& graph, const Partition& part) {
-    NodeIx nix = 0;
-    // to which clusterId does a nix belong
-    std::vector<NodeIx> clusterLookup(graph.numNodes, graph.numNodes + 1);
-    for(const Cluster& cluster: part) {
-        for (const ClusterVertex& cv: cluster) {
-            clusterLookup[cv.nix] = nix;
+    NodeIx compared = 0;
+    for (size_t i = 0; i < gpu.clusterIds.size(); ++i) {
+        const int label = gpu.clusterIds[i];
+        const SweepCutData& cut = gpu.cuts[i];
+        EXPECT_EQ(cut.clusterId, label);
+        if (!activeLabels.contains(label)) {
+            ADD_FAILURE() << "sweep cut for label " << label << ", which is not an active cluster";
+            continue;
         }
-        nix++;
+        const NodeIx c = index.at(label);
+
+        std::vector<float> clusterKeys;
+        for (const auto& cv : host.getCluster(c)) clusterKeys.push_back(keys[cv.nix]);
+        std::sort(clusterKeys.begin(), clusterKeys.end());
+        if (std::adjacent_find(clusterKeys.begin(), clusterKeys.end()) != clusterKeys.end()) continue;
+
+        const auto sparsities = prefixSparsities(host, c, keys);
+        if (sparsities.empty()) {
+            ADD_FAILURE() << "active cluster " << label << " has no proper cut";
+            continue;
+        }
+        const double best = *std::min_element(sparsities.begin(), sparsities.end());
+        const double tolerance = 1e-5 * (1.0 + best);   // the GPU computes the sparsity in float
+
+        EXPECT_NEAR(cut.sparsity, best, tolerance) << "best sparsity of cluster " << label;
+        if (cut.offset >= 1 && cut.offset <= sparsities.size()) {
+            EXPECT_NEAR(sparsities[cut.offset - 1], best, tolerance) << "GPU cuts cluster " << label << " after a prefix that is not optimal";
+        } else {
+            ADD_FAILURE() << "sweep-cut offset " << cut.offset << " of cluster " << label << " is not a proper prefix length";
+        }
+        ++compared;
     }
-    return clusterLookup;
+    return compared;
 }
 
+/**
+ * GPU state after cutClusters against the host:
+ *  - every cluster (active or not) is connected: the GPU splits cut clusters into their components,
+ *  - for every node (active or not), an edge is valid exactly if both endpoints have the same label,
+ *  - for every node, the internal degree is the weight of its valid edges.
+ * Inactive nodes are no longer processed after their deactivation, so this also checks that their edges were
+ * finalized correctly when they were deactivated.
+ */
+template<class GraphT>
+void expectStateAfterCutMatchesHost(CudaDeviceManager& cuda, const GraphT& graph) {
+    const auto labels = cuda.downloadLabels();
+    const auto valid = cuda.downloadActiveEdgeMap();
+    const auto degrees = cuda.downloadDegrees();
+    ASSERT_EQ(labels.size(), graph.numNodes);
+    ASSERT_EQ(valid.size(), graph.edges.size());
 
-TEST_F(CudaTest, CutTest) {
-    auto rwData = cuda.readRandomWalkValues();
-    RandomWalk rw(graph.numNodes);
-    rw.setData(rwData);
-    Partition part(&graph);
+    auto copy = copyGraph(graph);
+    Partition host{copy};
+    splitByLabels(host, labels);
+    if (::testing::Test::HasFailure()) return;
+    expectClustersConnected(host);
 
-    // take 10 steps
-    for(int i = 0; i < 10; i++) {
-        rw.iterate(part, {0});
-        cuda.iterateRandomWalk();
-    }
-
-    auto y = cuda.readRandomWalkValues();
-    auto z = rw.values();
-
-    for (NodeIx nix = 0; nix < graph.numNodes; nix++) {
-        ASSERT_NEAR(y[nix], z[nix], 0.00001) << "Error for nix = " << nix;
-    }
-
-    Timer t;
-
-    t.start();
-    // this only cuts cluster 0
-    SweepCut sweepCut = part.sweepCut(0, z);
-    std::vector<NodeIx> modified{0};
-    part.split<false, false>(0, sweepCut.offset, modified);
-    auto timeCPU = t.timeMicros();
-    std::cout << "CPU time: " << timeCPU << "μs\t\toffset was " << sweepCut.offset  << std::endl;
-
-    std::vector<NodeIx> expectedLabels = getLabels(graph, part);
-
-    t.start();
-    cuda.computeSweepCuts();
-    cuda.cutClusters();
-    auto timeGPU = t.timeMicros();
-    std::cout << "GPU time: " << timeGPU << "μs" << std::endl;
-
-    std::cout << "\t -> speedup: " << (static_cast<float>(timeCPU) / timeGPU) << std::endl;
-
-
-    AllSweepCuts result = cuda.readSweepCuts();
-    EXPECT_NEAR(result.cuts[0].sparsity, sweepCut.sparsity, 0.00000001);
-
-    // std::vector<NodeData> pt = cuda.downloadPartition();
-
-    FinalPartition fp = cuda.getFinalPartition();
-
-    for (NodeIx nix = 0; nix < graph.numNodes; nix++) {
-        EXPECT_EQ(fp.clusterIds[nix], expectedLabels[nix]) << " nix: " << nix;
+    int mismatches = 0;
+    for (NodeIx v = 0; v < graph.numNodes && mismatches < 10; ++v) {
+        uint64_t internalDegree = 0;
+        for (EdgeIx eix = graph.startIndex(v); eix < graph.endIndex(v); ++eix) {
+            const bool sameCluster = labels[graph.edges[eix]] == labels[v];
+            if (static_cast<bool>(valid[eix]) != sameCluster) {
+                ADD_FAILURE() << "edge " << v << " -> " << graph.edges[eix] << " is " << (valid[eix] ? "valid" : "disabled")
+                              << ", but the labels are " << labels[v] << " and " << labels[graph.edges[eix]];
+                ++mismatches;
+            }
+            if (sameCluster) internalDegree += static_cast<uint64_t>(graph.edgeWeight(eix));
+        }
+        if (static_cast<uint64_t>(degrees[v]) != internalDegree) {
+            ADD_FAILURE() << "internal degree of node " << v << ": GPU " << degrees[v] << ", host " << internalDegree;
+            ++mismatches;
+        }
     }
 }
 
-inline int hashVector(const std::vector<NodeIx>& vec) {
-    unsigned int sum = 0;
-
-    for (unsigned int x : vec) {
-        unsigned int h = x * 0x45d9f3b;
-        h = ((h >> 16) ^ h) * 0x45d9f3b;
-        h = ((h >> 16) ^ h);
-        sum += h;
-    }
-
-    return static_cast<int>(sum & 0x7FFFFFFF);
-}
-
-std::unordered_map<int, int> gpuLookup(const std::vector<NodeData>& pt) {
-
-    std::unordered_map<int, std::vector<NodeIx>> clusters;
-
-    for (const NodeData& nd: pt) {
-        clusters[nd.label].push_back(nd.nix);
-    }
-
-    std::unordered_map<int, int> lookup;
-
-    for (auto& [label, nodes]: clusters) {
-        lookup[hashVector(nodes)] = label;
-    }
-
-    return lookup;
-}
-
-
-TEST_P(CudaTest, RepeatedCuts) {
-    resetGraph();
-
-    auto rwData = cuda.readRandomWalkValues();
-    RandomWalk rw(graph.numNodes);
-    rw.setData(rwData);
-    Partition part(&graph);
-
-    std::vector<NodeIx> active, next{0};
-
-    for(int i = 0; i < GetParam(); i++) {
-        std::cout << "=====================================================================================" << std::endl;
-
-        std::swap(active, next);
-        next.clear();
-
-
-        auto deg = cuda.downloadDegrees();
-        for(NodeIx nix = 0; nix < graph.numNodes; nix++) {
-            ASSERT_EQ(part.vertexFor(nix).nix, nix);
-            ASSERT_EQ(part.vertexFor(nix).internalDegree, deg[nix]) << " nix = " << nix << "\t Iteration: " << (i+1);
-        }
-
-        // pt = cuda.downloadPartition();
-        // for (NodeIx cid = 0; cid < part.numClusters(); cid++) {
-        //     for (const ClusterVertex& cv: part.getCluster(cid)) {
-        //         ASSERT_EQ(pt[cv.nix].label, cid) << " nix: " << cv.nix << "\t Iteration: " << (i+1);
-        //     }
-        // }
-
-        rw.iterate(part, active);
-        cuda.iterateRandomWalk();
-
-        auto y = cuda.readRandomWalkValues();
-        auto z = rw.values();
-
-        // pt = cuda.downloadPartition();
-        // for (NodeIx cid = 0; cid < part.numClusters(); cid++) {
-        //     for (const ClusterVertex& cv: part.getCluster(cid)) {
-        //         ASSERT_EQ(pt[cv.nix].label, cid) << " nix: " << cv.nix << "\t Iteration: " << (i+1);
-        //     }
-        // }
-
-        for (NodeIx cix: active) {
-            const Cluster& cluster = part.getCluster(cix);
-            for (const ClusterVertex& cv: cluster) {
-                EXPECT_NEAR(y[cv.nix], z[cv.nix], 0.00001) << " nix = " << cv.nix << "\t Iteration: " << (i+1);
-            }
-        }
-
-        // TODO active should remove inactive clusters, then only check active nodes for random walk equality!!
-
-        cuda.computeSweepCuts();
-        auto gpuSweepCuts = cuda.readSweepCuts();
-
-        pt = cuda.downloadPartition();
-
-        std::unordered_map<int, int> lookup = gpuLookup(pt);
-
-        for(NodeIx ix = 0; ix < active.size(); ix++) {
-            std::vector<NodeIx> m;
-            part.consolidate(ix, active);
-        }
-
-
-        NodeIx numClusters = active.size();
-        for(NodeIx ix = 0; ix < numClusters; ix++) {
-            NodeIx clusterId =  active[ix];
-            SweepCut sweepCut = part.sweepCut(clusterId, z);
-
-            const Cluster& currentCluster = part.getCluster(clusterId);
-            std::vector<NodeIx> nodesInCluster;
-            nodesInCluster.reserve(currentCluster.size());
-            for (const ClusterVertex& cv: currentCluster) {
-                nodesInCluster.push_back(cv.nix);
-            }
-            int cpuHash = hashVector(nodesInCluster);
-            // std::cout << "cpuHash: " << cpuHash << std::endl;
-
-            auto it = lookup.find(cpuHash);
-            ASSERT_NE(it, lookup.end());
-            int gpuLabel = it->second;
-
-            if (gpuLabel == 316) {
-
-                int ix = 0;
-                for (NodeIx nix: nodesInCluster) {
-                    EdgeIx edgeDiff = sweepCut.pS[ix].edgeDiff;
-                    EdgeIx vol = sweepCut.pS[ix].vol;
-                    EdgeIx clusterVol = part.getCluster(clusterId).internalVolume;
-
-
-                    EdgeIx denom = (std::min(vol, clusterVol - vol));
-                    frac_t sparsity = static_cast<frac_t>(edgeDiff) / static_cast<frac_t>(denom);
-
-                    // printf("Node %d has label %d at offset ???, rwvalue = %f, prefixSum = %d and prefixVol = %d -> sparsity: %f, denom = %d, clusterVol = %d\n", nix, gpuLabel, z[nix], edgeDiff, vol, sparsity, denom, clusterVol);
-                    ix++;
-                }
-            }
-
-            // check equal sparsity cuts
-            for (int j = 0; j < gpuSweepCuts.clusterIds.size(); j++) {
-                if (gpuSweepCuts.clusterIds[j] == gpuLabel) {
-                    ASSERT_NEAR(gpuSweepCuts.cuts[j].sparsity, sweepCut.sparsity, 0.00000001) << "GPU label: " << gpuLabel;
-                    if (sweepCut.sparsity < 1 && gpuSweepCuts.cuts[j].sparsity < 1) {
-                        // EXPECT_EQ(gpuSweepCuts.cuts[j].offset - 1, sweepCut.offset);
-                        sweepCut.offset = gpuSweepCuts.cuts[j].offset - 1;
-                    }
-                    break;
-                }
-            }
-
-            if (sweepCut.sparsity >= sc_threshold) continue;
-            part.split<false, true>(clusterId, sweepCut.offset, active);
-        }
-
-        for (NodeIx cix = 0; cix < part.numClusters(); cix++) {
-            float potential = rw.recenterCluster(part.getCluster(cix));
-            if (potential >= rw_threshold) {
-                next.push_back(cix);
-            }
-        }
-
-        std::vector<NodeIx> expectedLabels = getLabels(graph, part);
-
-
-        cuda.cutClusters();
-        pt = cuda.downloadPartition();
-
-        // checks
-        for (NodeIx nix = 0; nix < graph.numNodes; nix++) {
-            ASSERT_EQ(pt[nix].nix, nix);
-            printf("Node %d is in cluster %d\n", nix, pt[nix].label);
-            // EXPECT_EQ(pt[nix].label, expectedLabels[nix]) << " nix: " << nix << "\t Iteration: " << (i+1);
-        }
-
-        for (NodeIx cix = 0; cix < part.numClusters(); cix++) {
-            ClusterVertex first = *part.getCluster(cix).begin();
-            NodeIx label = pt[first.nix].label;
-            for (const ClusterVertex& cv: part.getCluster(cix)) {
-                ASSERT_EQ(pt[cv.nix].label, label) << "nix " << cv.nix << " should be in cluster " << label << ", but is in " << pt[cv.nix].label << ". First is " << first.nix  << "\t Iteration: " << (i+1);
-            }
-        }
-
-
-        y = cuda.readRandomWalkValues();
-        z = rw.values();
-        for (NodeIx cix: next) {
-            const Cluster& cluster = part.getCluster(cix);
-            for (const ClusterVertex& cv: cluster) {
-                EXPECT_NEAR(y[cv.nix], z[cv.nix], 0.00001) << " nix = " << cv.nix << "\t Iteration: " << (i+1);
-            }
-        }
-
-
-        // for (NodeIx nix = 0; nix < graph.numNodes; nix++) {
-        //     NodeIx ownLabel = pt[nix].label;
-        //     for(auto it = graph.nbegin(nix); it != graph.nend(nix); ++it) {
-        //         NodeIx nb = *it;
-        //         NodeIx nbLabel = pt[nb].label;
-        //         int edgeActive = (nbLabel == ownLabel) ? 1 : 0;
-        //         EdgeIx eix = std::distance(graph.edges.begin(), it);
-        //         if (eix == 2) {
-        //             const auto& neighbors = graph.edges;
-        //             printf("CPU: %d (%d) <-> %d (%d)\n", nix, ownLabel, nb, nbLabel);
-        //             printf("CPU-neighbors: %d %d %d %d %d %d %d\n", neighbors[0], neighbors[1], neighbors[2], neighbors[3], neighbors[4], neighbors[5], neighbors[6]);
-        //         }
-        //
-        //         ASSERT_EQ(aem[eix], edgeActive) << " eix = " << eix << "\n labels: " << ownLabel << " <-> " << nbLabel;
-        //     }
-        // }
-    }
-}
-
-
-TEST_F(CudaTest, ExpanderDecomposition) {
-    GTEST_SKIP();
-    Timer t;
-    t.start();
+// Runs the full GPU decomposition and returns the final labels
+template<class GraphT>
+std::vector<int> decomposeOnGpu(const GraphT& graph) {
+    CudaDeviceManager cuda;
+    cuda.initialize(graph);
     cuda.expanderDecomposition();
+    const FinalPartition result = cuda.getFinalPartition();
+    EXPECT_EQ(result.numClusters, static_cast<int>(std::set<int>(result.clusterIds.begin(), result.clusterIds.end()).size()));
+    return result.clusterIds;
+}
 
-    printf("Terminated after %fs\n", t.timeSeconds());
+} // namespace
+
+
+// ---------------------------------------------------------------------------------------------------------------------
+// Upload
+// ---------------------------------------------------------------------------------------------------------------------
+
+TYPED_TEST(CudaTest, UploadMatchesHostGraph) {
+    constexpr NodeIx n = 100;
+    const auto graph = makeGraph<TypeParam>(n, randomEdges(n, 400, 9, 1, true));
+
+    CudaDeviceManager cuda;
+    cuda.initialize(graph);
+
+    const CsrGraph<> structure = cuda.downloadGraph();
+    EXPECT_EQ(structure.numNodes, graph.numNodes);
+    EXPECT_EQ(structure.numEdges, graph.numEdges);
+    EXPECT_EQ(structure.ranges, graph.ranges);
+    EXPECT_EQ(structure.edges, graph.edges);
+
+    const auto weights = cuda.downloadWeights();
+    const auto hostWeights = graph.edgeWeights();
+    EXPECT_EQ(weights, std::vector<DevEdgeWeight>(hostWeights.begin(), hostWeights.end()));   // empty for unweighted
+
+    const auto degrees = cuda.downloadDegrees();
+    ASSERT_EQ(degrees.size(), n);
+    for (NodeIx v = 0; v < n; ++v) EXPECT_EQ(degrees[v], graph.weightedDegree(v)) << "node " << v;
+
+    const auto labels = cuda.downloadLabels();
+    EXPECT_TRUE(std::all_of(labels.begin(), labels.end(), [](int l) { return l == 0; })) << "all nodes start in cluster 0";
+
+    const auto valid = cuda.downloadActiveEdgeMap();
+    EXPECT_TRUE(std::all_of(valid.begin(), valid.end(), [](int x) { return x == 1; })) << "all edges start valid";
 }
 
 
-*/
+// ---------------------------------------------------------------------------------------------------------------------
+// Every phase of the decomposition loop against the host
+// ---------------------------------------------------------------------------------------------------------------------
+
+TYPED_TEST(CudaTest, EveryPhaseMatchesHost) {
+    const auto graph = makeGraph<TypeParam>(48, plantedClusters(4, 12, 6, 1));
+
+    CudaDeviceManager cuda;
+    cuda.initialize(graph);
+
+    // same loop as CudaDeviceManager::expanderDecomposition, with checks between the phases
+    std::vector<int> previous = cuda.downloadLabels();
+    NodeIx comparedSweepCuts = 0;
+    int iteration = 0;
+    constexpr int maxIterations = 2000;
+
+    for (; iteration < maxIterations && anyActive(previous); ++iteration) {
+        SCOPED_TRACE("iteration " + std::to_string(iteration));
+
+        expectWalkStepMatchesHost(cuda, graph);
+        comparedSweepCuts += expectSweepCutsMatchHost(cuda, graph);
+        cuda.cutClusters();
+        expectStateAfterCutMatchesHost(cuda, graph);
+
+        // deactivated clusters never change again, and newly deactivated clusters get labels that are not in use
+        const auto labels = cuda.downloadLabels();
+        std::set<int> inactiveBefore;
+        for (const int l : previous) {
+            if (!isActive(l)) inactiveBefore.insert(l);
+        }
+        for (NodeIx v = 0; v < graph.numNodes; ++v) {
+            if (!isActive(previous[v])) {
+                EXPECT_EQ(labels[v], previous[v]) << "label of inactive node " << v << " changed";
+            } else if (!isActive(labels[v])) {
+                EXPECT_FALSE(inactiveBefore.contains(labels[v]))
+                    << "node " << v << " was deactivated with label " << labels[v] << ", which an earlier inactive cluster already has";
+            }
+        }
+        previous = labels;
+
+        if (::testing::Test::HasFailure()) return;
+    }
+
+    EXPECT_FALSE(anyActive(previous)) << "no termination within " << maxIterations << " iterations";
+    EXPECT_GT(comparedSweepCuts, 0u) << "no sweep cut could be compared (float ties in every cluster)";
+}
 
 
+// ---------------------------------------------------------------------------------------------------------------------
+// Final partition
+// ---------------------------------------------------------------------------------------------------------------------
+
+TYPED_TEST(CudaTest, DecompositionGivesConnectedClusters) {
+    // several graphs: whether a bug shows up can depend on the order in which clusters converge
+    struct Config { NodeIx clusters, size, bridges; };
+    for (const Config cfg : {Config{6, 10, 10}, Config{8, 6, 12}, Config{5, 15, 4}, Config{10, 5, 20}}) {
+        for (unsigned seed = 0; seed < 3; ++seed) {
+            SCOPED_TRACE(std::to_string(cfg.clusters) + " clusters of " + std::to_string(cfg.size) + ", seed " + std::to_string(seed));
+            const auto graph = makeGraph<TypeParam>(cfg.clusters * cfg.size, plantedClusters(cfg.clusters, cfg.size, cfg.bridges, seed));
+            const auto labels = decomposeOnGpu(graph);
+
+            auto copy = copyGraph(graph);
+            const auto snapshot = adjacencySnapshot(copy);
+            Partition host{copy};
+            splitByLabels(host, labels);
+            expectPartitionConsistent(host, &snapshot);
+            expectClustersConnected(host);
+            if (::testing::Test::HasFailure()) return;
+        }
+    }
+}
+
+TYPED_TEST(CudaTest, CudaExpanderDecompositionReturnsConsistentPartition) {
+    // the entry point in cuda.h, used by the CLI and as decomposer of the hierarchy
+    auto graph = makeGraph<TypeParam>(60, plantedClusters(6, 10, 10, 3));
+    const auto snapshot = adjacencySnapshot(graph);
+
+    Partition<TypeParam> result = cudaExpanderDecomposition(graph);
+    result.updateSelfReferences();   // the clusters point to their Partition, which was returned by value
+
+    expectPartitionConsistent(result, &snapshot);
+    expectClustersConnected(result);
+}
+
+TYPED_TEST(CudaTest, NumCutEdgesMatchesHost) {
+    const auto graph = makeGraph<TypeParam>(60, plantedClusters(6, 10, 10, 4));
+
+    CudaDeviceManager cuda;
+    cuda.initialize(graph);
+    cuda.expanderDecomposition();
+    const FinalPartition result = cuda.getFinalPartition();
+
+    auto copy = copyGraph(graph);
+    Partition host{copy};
+    splitByLabels(host, result.clusterIds);
+
+    EXPECT_EQ(cuda.getNumCutEdges(), host.getNumCutEdges());
+}
+
+
+// ---------------------------------------------------------------------------------------------------------------------
+// Weights
+// ---------------------------------------------------------------------------------------------------------------------
+
+TEST(CudaWeightsTest, AllOnesWeightsBehaveExactlyLikeUnweighted) {
+    auto edges = plantedClusters(5, 10, 8, 5);
+    for (auto& e : edges) e.w = 1;
+    const auto unweighted = makeGraph<Unweighted32>(50, edges);
+    const auto weighted = makeGraph<Weighted32>(50, edges);
+
+    // the same random walk, bit for bit
+    {
+        CudaDeviceManager a, b;
+        a.initialize(unweighted);
+        b.initialize(weighted);
+        EXPECT_EQ(a.readRandomWalkValues(), b.readRandomWalkValues());
+        for (int step = 0; step < 5; ++step) {
+            a.iterateRandomWalk();
+            b.iterateRandomWalk();
+            EXPECT_EQ(a.readRandomWalkValues(), b.readRandomWalkValues()) << "after step " << step;
+        }
+    }
+
+    // the same decomposition
+    EXPECT_EQ(decomposeOnGpu(unweighted), decomposeOnGpu(weighted));
+}
+
+TEST(CudaWeightsTest, ContractedHierarchyLevelsDecomposeConsistently) {
+    constexpr NodeIx n = 300;
+    auto graph = makeGraph<Unweighted32>(n, randomEdges(n, 1200, 1, 7, true));
+
+    random_source.seed(11);
+    auto hierarchy = buildExpanderHierarchy(graph);   // CPU decomposition; levels are CsrGraph<EdgeIx>
+    static_assert(std::same_as<std::remove_cvref_t<decltype(hierarchy.lvl(0).graph)>, Weighted32>);
+
+    NodeIx checked = 0;
+    for (NodeIx l = 0; l < hierarchy.height(); ++l) {
+        const auto& level = hierarchy.lvl(l).graph;
+        if (level.numEdges == 0) continue;
+        SCOPED_TRACE("level " + std::to_string(l));
+
+        const auto labels = decomposeOnGpu(level);
+
+        auto copy = copyGraph(level);
+        Partition host{copy};
+        splitByLabels(host, labels);
+        expectPartitionConsistent(host);
+        expectClustersConnected(host);
+        ++checked;
+    }
+    EXPECT_GT(checked, 0u);
+}

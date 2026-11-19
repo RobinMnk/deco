@@ -133,7 +133,7 @@ struct CudaDeviceManager::Impl {
 
         // inspect(pt->getUniqueActiveLabels(), pt->numActiveClusters);
 
-        pt->recenterAndDeactivateClusters(rw->getValues(), sc->d_smallestLabel);
+        pt->recenterAndDeactivateClusters(rw->getValues());
 
         // inspect(pt->getUniqueActiveLabels(), pt->numActiveClusters);
         // fp = getFinalPartition();

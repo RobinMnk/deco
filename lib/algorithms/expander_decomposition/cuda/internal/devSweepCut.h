@@ -230,7 +230,6 @@ class SweepCutManager {
 
 public:
     NodeIx numClustersWithCut{0};
-    label_t* d_smallestLabel = nullptr;
 
     explicit SweepCutManager(NodeIx n) :
         numNodes(n),
@@ -245,18 +244,12 @@ public:
         sweepCuts(n),
         sweepCutsBuffer(n)
     {
-        cudaMalloc(&d_smallestLabel, sizeof(label_t));
-        constexpr label_t initSmallestLabel = std::numeric_limits<label_t>::max();
-        cudaMemcpy(d_smallestLabel, &initSmallestLabel, sizeof(label_t), cudaMemcpyHostToDevice);
         initializeCUB(n);
     }
 
     ~SweepCutManager() {
         if (d_temp_storage) {
             cudaFree(d_temp_storage);
-        }
-        if (d_smallestLabel) {
-            cudaFree(d_smallestLabel);
         }
     }
 
@@ -452,18 +445,6 @@ void SweepCutManager::print(const double* dist) {
     fflush(stdout);
 }
 
-struct StoreSmallestLabelOp {
-    label_t* d_smallestLabel;
-
-    __host__ __device__
-    explicit StoreSmallestLabelOp(label_t* ptr) : d_smallestLabel(ptr) {}
-
-    __host__ __device__
-    void operator()(const label_t label) const {
-        *d_smallestLabel = label;
-    }
-};
-
 /**
  *
  *
@@ -531,15 +512,6 @@ inline void SweepCutManager::prepare_nodes(GraphManager& gm, PartitionManager& p
     // }
     // printf("\n");
     // fflush(stdout);
-
-    if (pm.numActiveNodes > 0) {
-        thrust::for_each_n(
-            thrust::device,
-            allLabels,
-            1,
-            StoreSmallestLabelOp(d_smallestLabel)
-        );
-    }
 
     // this now contains only labels of active nodes
     auto activeLabels = thrust::lower_bound(
