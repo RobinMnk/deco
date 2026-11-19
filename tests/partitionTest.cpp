@@ -274,6 +274,63 @@ TYPED_TEST(WeightedPartitionTest, SplitMatchesHandComputedCutAndVolumes) {
 
 
 // ---------------------------------------------------------------------------------------------------------------------
+// An edge of weight w behaves like w parallel edges of weight 1
+// ---------------------------------------------------------------------------------------------------------------------
+
+TEST(ParallelEdgesTest, WeightedEdgesBehaveLikeParallelEdges) {
+    constexpr NodeIx n = 30;
+    const auto edges = randomEdges(n, 80, 4, 21, true);
+    auto weighted = makeGraph<Weighted32>(n, edges);
+    auto parallel = makeGraph<Unweighted32>(n, expandToParallelEdges(edges));
+
+    for (NodeIx v = 0; v < n; ++v) EXPECT_EQ(weighted.weightedDegree(v), parallel.weightedDegree(v)) << "node " << v;
+
+    Partition pw{weighted};
+    Partition pp{parallel};
+
+    std::mt19937 rng(22);
+    std::vector<NodeIx> labels(n);
+    for (auto& l : labels) l = rng() % 3;
+    std::vector<NodeIx> modifiedW, modifiedP;
+    pw.template splitByIndices<true, true>(0, labels, 3, modifiedW);
+    pp.template splitByIndices<true, true>(0, labels, 3, modifiedP);
+    expectPartitionConsistent(pw);
+    expectPartitionConsistent(pp);
+
+    // the same clusters, with the same volumes and internal degrees
+    const auto labelW = clusterLabels(pw), labelP = clusterLabels(pp);
+    ASSERT_EQ(pw.numClusters(), pp.numClusters());
+    for (NodeIx u = 0; u < n; ++u) {
+        EXPECT_EQ(pw.vertexFor(u).internalDegree, pp.vertexFor(u).internalDegree) << "node " << u;
+        for (NodeIx v = u + 1; v < n; ++v) EXPECT_EQ(labelW[u] == labelW[v], labelP[u] == labelP[v]) << "nodes " << u << ", " << v;
+    }
+    for (NodeIx c = 0; c < pw.numClusters(); ++c) {
+        const auto& cw = pw.getCluster(c);
+        if (cw.size() == 0) continue;
+        const auto& cp = pp.getCluster(labelP[cw.begin()->nix]);
+        EXPECT_EQ(cw.volume, cp.volume) << "cluster " << c;
+        EXPECT_EQ(cw.internalVolume, cp.internalVolume) << "cluster " << c;
+    }
+
+    // cut weight equals the number of cut parallel edges
+    EXPECT_EQ(pw.getCutSize(), pp.getCutSize());
+    EXPECT_EQ(pp.getNumCutEdges(), pw.getCutSize());
+
+    // identical sweep cuts (integer arithmetic on both sides)
+    for (NodeIx c = 0; c < pw.numClusters(); ++c) {
+        const auto& cw = pw.getCluster(c);
+        if (cw.size() < 2) continue;
+        const NodeIx cpId = labelP[cw.begin()->nix];
+        const auto values = randomValues(n, rng);
+        const SweepCut sw = pw.sweepCut(c, values);
+        const SweepCut sp = pp.sweepCut(cpId, values);
+        EXPECT_DOUBLE_EQ(sw.sparsity, sp.sparsity) << "cluster " << c;
+        EXPECT_EQ(sw.offset, sp.offset) << "cluster " << c;
+    }
+}
+
+
+// ---------------------------------------------------------------------------------------------------------------------
 // Random sequences of operations
 // ---------------------------------------------------------------------------------------------------------------------
 

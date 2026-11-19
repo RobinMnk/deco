@@ -93,6 +93,18 @@ inline std::vector<WeightedEdge> randomEdges(NodeIx n, EdgeIx m, uint32_t maxWei
 }
 
 /**
+ * The same graph as a multigraph: every edge of weight w becomes w parallel edges of weight 1.
+ * Algorithmically, both should be equivalent.
+ */
+inline std::vector<WeightedEdge> expandToParallelEdges(const std::vector<WeightedEdge>& edges) {
+    std::vector<WeightedEdge> parallel;
+    for (const auto& e : edges) {
+        for (uint32_t i = 0; i < e.w; ++i) parallel.push_back({e.u, e.v, 1});
+    }
+    return parallel;
+}
+
+/**
  * Sorted (neighbor, weight) pairs of every node. Taken before running a Partition on a graph and compared
  * afterwards: Partition reorders edges within each adjacency list, which must not change the graph itself.
  */

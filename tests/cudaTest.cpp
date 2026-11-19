@@ -401,6 +401,38 @@ TEST(CudaWeightsTest, AllOnesWeightsBehaveExactlyLikeUnweighted) {
     EXPECT_EQ(decomposeOnGpu(unweighted), decomposeOnGpu(weighted));
 }
 
+TEST(CudaWeightsTest, WeightedEdgesBehaveLikeParallelEdges) {
+    const auto edges = plantedClusters(4, 8, 6, 9);   // weights 1 to 6
+    const auto weighted = makeGraph<Weighted32>(32, edges);
+    const auto parallel = makeGraph<Unweighted32>(32, expandToParallelEdges(edges));
+
+    CudaDeviceManager a, b;
+    a.initialize(weighted);
+    b.initialize(parallel);
+
+    // same degrees -> same starting values, bit for bit
+    EXPECT_EQ(a.downloadDegrees(), b.downloadDegrees());
+    EXPECT_EQ(a.readRandomWalkValues(), b.readRandomWalkValues());
+
+    // w * y vs. y + ... + y: equal up to rounding
+    for (int step = 0; step < 5; ++step) {
+        a.iterateRandomWalk();
+        b.iterateRandomWalk();
+        const auto va = a.readRandomWalkValues(), vb = b.readRandomWalkValues();
+        for (NodeIx v = 0; v < weighted.numNodes; ++v) {
+            EXPECT_NEAR(va[v], vb[v], 1e-9 * (1.0 + std::abs(va[v]))) << "node " << v << " after step " << step;
+        }
+    }
+
+    // the same best sweep cut (sparsity in float on the GPU)
+    a.computeSweepCuts();
+    b.computeSweepCuts();
+    const AllSweepCuts sa = a.readSweepCuts(), sb = b.readSweepCuts();
+    ASSERT_EQ(sa.cuts.size(), 1u);
+    ASSERT_EQ(sb.cuts.size(), 1u);
+    EXPECT_NEAR(sa.cuts[0].sparsity, sb.cuts[0].sparsity, 1e-5 * (1.0 + sa.cuts[0].sparsity));
+}
+
 TEST(CudaWeightsTest, ContractedHierarchyLevelsDecomposeConsistently) {
     constexpr NodeIx n = 300;
     auto graph = makeGraph<Unweighted32>(n, randomEdges(n, 1200, 1, 7, true));
