@@ -10,11 +10,9 @@
 #include <thrust/iterator/counting_iterator.h>
 #include <thrust/random.h>
 
-#include <curand_kernel.h>
 
 #include <cub/cub.cuh>
 #include <cassert>
-#include <thrust/detail/binary_search.inl>
 
 #include "devGraph.h"
 
