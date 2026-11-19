@@ -235,6 +235,30 @@ TYPED_TEST(PartitionTest, SweepCutMatchesBruteForce) {
 }
 
 
+TYPED_TEST(PartitionTest, MovedPartitionStaysUsable) {
+    // clusters and the internal DFS point back to their Partition; a move must re-point them
+    auto graph = makeGraph<TypeParam>(10, twoCliques(5, 1, 2, 3));
+    const auto snapshot = adjacencySnapshot(graph);
+    Partition original{graph};
+
+    Partition moved{std::move(original)};
+    expectPartitionConsistent(moved, &snapshot);
+
+    // consolidation uses the DFS: split into two disconnected pieces per part, as in the consolidation test above
+    const std::vector<NodeIx> labels{0, 0, 0, 1, 1, 1, 1, 0, 0, 1};
+    std::vector<NodeIx> modified;
+    moved.template splitByIndices<true, true>(0, labels, 2, modified);
+    EXPECT_EQ(moved.numClusters(), 4u);
+    expectPartitionConsistent(moved, &snapshot);
+    expectClustersConnected(moved);
+
+    Partition assigned{graph};
+    assigned = std::move(moved);
+    EXPECT_EQ(assigned.numClusters(), 4u);
+    expectPartitionConsistent(assigned, &snapshot);
+}
+
+
 // ---------------------------------------------------------------------------------------------------------------------
 // Hand-computed weighted example (independent of the recomputation in expectPartitionConsistent)
 // ---------------------------------------------------------------------------------------------------------------------

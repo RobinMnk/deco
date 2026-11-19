@@ -30,39 +30,6 @@ TYPED_TEST_SUITE(CudaTest, CudaGraphTypes);
 
 namespace {
 
-/**
- * `numClusters` cliques of `size` nodes (weights in [2, 6]), chained by one edge of weight 1 between consecutive
- * cliques, plus up to `extraBridges` random weight-1 edges between different cliques. Connected.
- */
-std::vector<WeightedEdge> plantedClusters(NodeIx numClusters, NodeIx size, NodeIx extraBridges, unsigned seed) {
-    std::mt19937 rng(seed);
-    std::uniform_int_distribution<uint32_t> weight(2, 6);
-    std::uniform_int_distribution<NodeIx> node(0, numClusters * size - 1);
-    std::set<std::pair<NodeIx, NodeIx>> seen;
-    std::vector<WeightedEdge> edges;
-
-    auto add = [&](NodeIx u, NodeIx v, uint32_t w) {
-        if (u > v) std::swap(u, v);
-        if (u != v && seen.insert({u, v}).second) edges.push_back({u, v, w});
-    };
-
-    for (NodeIx c = 0; c < numClusters; ++c)
-        for (NodeIx i = 0; i < size; ++i)
-            for (NodeIx j = i + 1; j < size; ++j)
-                add(c * size + i, c * size + j, weight(rng));
-
-    for (NodeIx c = 0; c + 1 < numClusters; ++c) add(c * size, (c + 1) * size + 1, 1);
-
-    for (NodeIx b = 0, tries = 0; b < extraBridges && tries < 100 * extraBridges; ++tries) {
-        const NodeIx u = node(rng), v = node(rng);
-        if (u / size == v / size) continue;
-        const size_t before = edges.size();
-        add(u, v, 1);
-        b += edges.size() > before;
-    }
-    return edges;
-}
-
 bool isActive(int label) { return label >= 0; }
 
 bool anyActive(const std::vector<int>& labels) {
@@ -352,7 +319,6 @@ TYPED_TEST(CudaTest, CudaExpanderDecompositionReturnsConsistentPartition) {
     const auto snapshot = adjacencySnapshot(graph);
 
     Partition<TypeParam> result = cudaExpanderDecomposition(graph);
-    result.updateSelfReferences();   // the clusters point to their Partition, which was returned by value
 
     expectPartitionConsistent(result, &snapshot);
     expectClustersConnected(result);
@@ -431,6 +397,18 @@ TEST(CudaWeightsTest, WeightedEdgesBehaveLikeParallelEdges) {
     ASSERT_EQ(sa.cuts.size(), 1u);
     ASSERT_EQ(sb.cuts.size(), 1u);
     EXPECT_NEAR(sa.cuts[0].sparsity, sb.cuts[0].sparsity, 1e-5 * (1.0 + sa.cuts[0].sparsity));
+}
+
+TYPED_TEST(CudaTest, HierarchyWithCudaDecomposerIsConsistent) {
+    // the way the GPU decomposition is used: as decomposer of every level of the expander hierarchy
+    constexpr NodeIx n = 300;
+    auto graph = makeGraph<TypeParam>(n, randomEdges(n, 1200, 9, 8, true));
+
+    auto hierarchy = buildExpanderHierarchy(graph, [](auto& level, const Config& config) {
+        return cudaExpanderDecomposition(level, config);
+    });
+
+    expectHierarchyConsistent(hierarchy, graph);
 }
 
 TEST(CudaWeightsTest, ContractedHierarchyLevelsDecomposeConsistently) {

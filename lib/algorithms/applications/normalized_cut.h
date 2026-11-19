@@ -8,6 +8,8 @@
 #include "algorithms/tree_cut_sparsifier/expander_hierarchy.h"
 
 #include <set>
+#include <stdexcept>
+#include <string>
 #include <vector>
 
 template<typename EdgeWeight>
@@ -20,6 +22,8 @@ class NormalizedCut {
         NodeIx nix{0};
         auto operator<=>(const TreeNode&) const = default;
     };
+
+    static constexpr frac_t NO_CANDIDATE = 100000;   // penalty of "no candidate found"
 
     struct Candidate {
         TreeNode tn;
@@ -59,7 +63,7 @@ class NormalizedCut {
      * Traverse hierarchy from tn downwards, find the edge minimizing the cutting-penalty
      */
     Candidate getCandidate(const TreeNode& tn, EdgeWeight clusterCutSize, EdgeWeight clusterVolume) {
-        Candidate bestCandidate{TreeNode{0, 0}, 100000};
+        Candidate bestCandidate{TreeNode{0, 0}, NO_CANDIDATE};
 
         if (tn.level == 0) return bestCandidate;
 
@@ -134,7 +138,7 @@ public:
 
         // every split adds one cluster -> k-1 splits for k clusters
         for (NodeIx i = 1; i < k; ++i) {
-            Candidate bestCandidate{TreeNode{0, 0}, 1000};
+            Candidate bestCandidate{TreeNode{0, 0}, NO_CANDIDATE};
             frac_t bestDelta = 100000;
 
             for (const TreeNode& root : roots) {
@@ -150,6 +154,11 @@ public:
                     bestCandidate = cd;
                 }
 
+            }
+
+            if (bestCandidate.penalty >= NO_CANDIDATE) {
+                throw std::invalid_argument("NormalizedCut: cannot split into " + std::to_string(k) +
+                                            " clusters, the hierarchy has no tree node left to split off");
             }
 
             split(bestCandidate.tn);

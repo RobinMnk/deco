@@ -34,6 +34,7 @@ endfunction()
 
 configure_test_target(graphTest graphTest.cpp)
 configure_test_target(partitionTest partitionTest.cpp)
+configure_test_target(algorithmsTest algorithmsTest.cpp)
 
 if(DECO_ENABLE_CUDA)
     configure_test_target(CudaTest cudaTest.cpp)

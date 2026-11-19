@@ -9,6 +9,8 @@
 
 #include <algorithm>
 #include <cstdint>
+#include <map>
+#include <numeric>
 #include <random>
 #include <set>
 #include <utility>
@@ -16,6 +18,7 @@
 
 #include "core/graph.h"
 #include "core/partition.h"
+#include "algorithms/tree_cut_sparsifier/expander_hierarchy.h"
 
 namespace testutil {
 
@@ -88,6 +91,39 @@ inline std::vector<WeightedEdge> randomEdges(NodeIx n, EdgeIx m, uint32_t maxWei
         if (u > v) std::swap(u, v);
         if (!seen.insert({u, v}).second) continue;
         edges.push_back({u, v, weight(rng)});
+    }
+    return edges;
+}
+
+/**
+ * `numClusters` cliques of `size` nodes (weights in [2, 6]), chained by one edge of weight 1 between consecutive
+ * cliques, plus up to `extraBridges` random weight-1 edges between different cliques. Connected.
+ */
+inline std::vector<WeightedEdge> plantedClusters(NodeIx numClusters, NodeIx size, NodeIx extraBridges, unsigned seed) {
+    std::mt19937 rng(seed);
+    std::uniform_int_distribution<uint32_t> weight(2, 6);
+    std::uniform_int_distribution<NodeIx> node(0, numClusters * size - 1);
+    std::set<std::pair<NodeIx, NodeIx>> seen;
+    std::vector<WeightedEdge> edges;
+
+    auto add = [&](NodeIx u, NodeIx v, uint32_t w) {
+        if (u > v) std::swap(u, v);
+        if (u != v && seen.insert({u, v}).second) edges.push_back({u, v, w});
+    };
+
+    for (NodeIx c = 0; c < numClusters; ++c)
+        for (NodeIx i = 0; i < size; ++i)
+            for (NodeIx j = i + 1; j < size; ++j)
+                add(c * size + i, c * size + j, weight(rng));
+
+    for (NodeIx c = 0; c + 1 < numClusters; ++c) add(c * size, (c + 1) * size + 1, 1);
+
+    for (NodeIx b = 0, tries = 0; b < extraBridges && tries < 100 * extraBridges; ++tries) {
+        const NodeIx u = node(rng), v = node(rng);
+        if (u / size == v / size) continue;
+        const size_t before = edges.size();
+        add(u, v, 1);
+        b += edges.size() > before;
     }
     return edges;
 }
@@ -202,6 +238,12 @@ void expectPartitionConsistent(
     const Partition<GraphT>& partition,
     const std::vector<std::vector<std::pair<NodeIx, uint64_t>>>* snapshot = nullptr
 ) {
+    // clusters point back to their Partition: this breaks if a Partition is copied or moved (e.g. returned by value
+    // without copy elision) without updateSelfReferences(). Checked first, iterating the clusters relies on it.
+    for (const auto& cluster : partition) {
+        ASSERT_EQ(cluster.partition, &partition) << "a cluster points to a different Partition object (Partition was copied or moved)";
+    }
+
     const GraphT& graph = partition.getGraph();
     const NodeIx n = graph.numNodes;
     constexpr NodeIx UNASSIGNED = static_cast<NodeIx>(-1);
@@ -310,6 +352,116 @@ void expectClustersConnected(const Partition<GraphT>& partition) {
         EXPECT_EQ(reached, cluster.size()) << "cluster " << c << " is not connected";
         ++c;
     }
+}
+
+/**
+ * Expected result of contracting `graph` along `parents` (cluster id of every node): for every pair of different
+ * clusters p < q, the summed weight of all edges between them. Edges within a cluster disappear.
+ */
+template<class GraphT>
+std::map<std::pair<NodeIx, NodeIx>, uint64_t> expectedContraction(const GraphT& graph, const std::vector<NodeIx>& parents) {
+    std::map<std::pair<NodeIx, NodeIx>, uint64_t> weight;
+    for (NodeIx u = 0; u < graph.numNodes; ++u) {
+        for (EdgeIx eix = graph.startIndex(u); eix < graph.endIndex(u); ++eix) {
+            const NodeIx p = parents[u], q = parents[graph.edges[eix]];
+            if (p < q) weight[{p, q}] += static_cast<uint64_t>(graph.edgeWeight(eix));   // every undirected edge once
+        }
+    }
+    return weight;
+}
+
+/**
+ * `contracted` is exactly the contraction described by `expected`: no self-loops, no parallel edges, and the right
+ * weight on every edge (in both directions).
+ */
+template<class ContractedGraph>
+void expectGraphMatchesContraction(const ContractedGraph& contracted, const std::map<std::pair<NodeIx, NodeIx>, uint64_t>& expected) {
+    EXPECT_EQ(contracted.numEdges, expected.size()) << "number of edges after contraction";
+    for (NodeIx p = 0; p < contracted.numNodes; ++p) {
+        std::set<NodeIx> neighbors;
+        for (EdgeIx eix = contracted.startIndex(p); eix < contracted.endIndex(p); ++eix) {
+            const NodeIx q = contracted.edges[eix];
+            EXPECT_NE(p, q) << "self-loop at " << p;
+            EXPECT_TRUE(neighbors.insert(q).second) << "parallel edge " << p << " -- " << q;
+            const auto it = expected.find({std::min(p, q), std::max(p, q)});
+            if (it == expected.end()) {
+                ADD_FAILURE() << "edge " << p << " -- " << q << " should not exist";
+            } else {
+                EXPECT_EQ(static_cast<uint64_t>(contracted.edgeWeight(eix)), it->second) << "weight of " << p << " -- " << q;
+            }
+        }
+    }
+}
+
+/**
+ * One level of an expander hierarchy against the graph one level below (`below`, with the volume of each of its nodes
+ * in the original graph in `belowVolumes`):
+ *  - sizes match, `parents` and `children` are inverse to each other,
+ *  - volumes[c] is the summed volume of c's children,
+ *  - cutSizes[c] is the weight of the edges leaving c's children in `below`, which is also c's weighted degree,
+ *  - the level's graph is exactly the contraction of `below` along `parents`.
+ */
+template<class Level, class BelowGraph>
+void expectLevelConsistent(const Level& level, const BelowGraph& below, const std::vector<uint64_t>& belowVolumes) {
+    const auto& g = level.graph;
+    ASSERT_EQ(level.volumes.size(), g.numNodes);
+    ASSERT_EQ(level.cutSizes.size(), g.numNodes);
+    ASSERT_EQ(level.childrenStart.size(), g.numNodes + 1);
+    ASSERT_EQ(level.parents.size(), below.numNodes);
+    ASSERT_EQ(level.children.size(), below.numNodes);
+
+    std::vector<int> seen(below.numNodes, 0);
+    for (NodeIx p = 0; p < g.numNodes; ++p) {
+        uint64_t volume = 0;
+        for (const NodeIx child : level.childrenOf(p)) {
+            ASSERT_LT(child, below.numNodes);
+            EXPECT_EQ(level.parents[child], p) << "children and parents disagree for node " << child;
+            ++seen[child];
+            volume += belowVolumes[child];
+        }
+        EXPECT_EQ(static_cast<uint64_t>(level.volumes[p]), volume) << "volume of cluster " << p;
+    }
+    for (NodeIx v = 0; v < below.numNodes; ++v) EXPECT_EQ(seen[v], 1) << "node " << v << " is not a child of exactly one cluster";
+
+    std::vector<uint64_t> cut(g.numNodes, 0);
+    for (NodeIx u = 0; u < below.numNodes; ++u) {
+        for (EdgeIx eix = below.startIndex(u); eix < below.endIndex(u); ++eix) {
+            if (level.parents[u] != level.parents[below.edges[eix]]) cut[level.parents[u]] += static_cast<uint64_t>(below.edgeWeight(eix));
+        }
+    }
+    for (NodeIx p = 0; p < g.numNodes; ++p) {
+        EXPECT_EQ(static_cast<uint64_t>(level.cutSizes[p]), cut[p]) << "cut size of cluster " << p;
+        EXPECT_EQ(static_cast<uint64_t>(g.weightedDegree(p)), cut[p]) << "weighted degree of contracted node " << p;
+    }
+
+    expectGraphMatchesContraction(g, expectedContraction(below, level.parents));
+}
+
+/**
+ * Every level of the hierarchy is consistent (see expectLevelConsistent), the total volume is preserved,
+ * and the hierarchy ends in a single node or a graph without edges.
+ */
+template<class EdgeWeight, class InputGraph>
+void expectHierarchyConsistent(ExpanderHierarchy<EdgeWeight>& hierarchy, const InputGraph& original) {
+    ASSERT_GT(hierarchy.height(), 0u);
+
+    std::vector<uint64_t> volumes(original.numNodes);
+    for (NodeIx v = 0; v < original.numNodes; ++v) volumes[v] = static_cast<uint64_t>(original.weightedDegree(v));
+    const uint64_t totalVolume = std::accumulate(volumes.begin(), volumes.end(), uint64_t{0});
+
+    for (NodeIx l = 0; l < hierarchy.height(); ++l) {
+        SCOPED_TRACE("level " + std::to_string(l));
+        const auto& level = hierarchy.lvl(l);
+        if (l == 0) expectLevelConsistent(level, original, volumes);
+        else        expectLevelConsistent(level, hierarchy.lvl(l - 1).graph, volumes);
+        if (::testing::Test::HasFatalFailure()) return;
+
+        volumes.assign(level.volumes.begin(), level.volumes.end());
+        EXPECT_EQ(std::accumulate(volumes.begin(), volumes.end(), uint64_t{0}), totalVolume) << "total volume changed";
+    }
+
+    const auto& top = hierarchy.lvl(hierarchy.height() - 1).graph;
+    EXPECT_TRUE(top.numNodes == 1 || top.numEdges == 0) << "hierarchy ends with " << top.numNodes << " nodes and " << top.numEdges << " edges";
 }
 
 } // namespace testutil

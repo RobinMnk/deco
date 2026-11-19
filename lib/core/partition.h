@@ -88,6 +88,8 @@ private:
     public:
         DFS(const Partition* part, NodeIx n) : m_visited(n), m_labels(n), m_stack(n), partition{part} {}
 
+        void setPartition(const Partition* part) { partition = part; }
+
         NodeIx computeLabels(const Cluster& cluster);
 
         [[nodiscard]]
@@ -114,6 +116,41 @@ public:
 //    SkipList sl;
 
     explicit Partition(Graph& gr);
+
+    // Clusters and the DFS helper point back to their Partition: copying is not supported, moving updates the pointers
+    // (a Partition returned by value is moved unless the compiler elides it).
+    Partition(const Partition&) = delete;
+    Partition& operator=(const Partition&) = delete;
+
+    Partition(Partition&& other) noexcept :
+        clusters(std::move(other.clusters)),
+        clusterVertices(std::move(other.clusterVertices)),
+        splitOracle(std::move(other.splitOracle)),
+        lookup(std::move(other.lookup)),
+        sc_seen(std::move(other.sc_seen)),
+        sc_removeAt(std::move(other.sc_removeAt)),
+        numCutEdges(other.numCutEdges),
+        cutSize(other.cutSize),
+        dfs(std::move(other.dfs)),
+        graph(other.graph)
+    {
+        updateSelfReferences();
+    }
+
+    Partition& operator=(Partition&& other) noexcept {
+        clusters = std::move(other.clusters);
+        clusterVertices = std::move(other.clusterVertices);
+        splitOracle = std::move(other.splitOracle);
+        lookup = std::move(other.lookup);
+        sc_seen = std::move(other.sc_seen);
+        sc_removeAt = std::move(other.sc_removeAt);
+        numCutEdges = other.numCutEdges;
+        cutSize = other.cutSize;
+        dfs = std::move(other.dfs);
+        graph = other.graph;
+        updateSelfReferences();
+        return *this;
+    }
 
     /// splits Cluster with given id into its connected components and adds resulting clusters to partition and their id to given list
     void consolidate(NodeIx clusterId, std::vector<NodeIx>& modified);
@@ -179,6 +216,7 @@ public:
         for(Cluster& cluster: clusters) {
             cluster.partition = this;
         }
+        dfs.setPartition(this);
     }
 }; // class Partition
 
@@ -246,6 +284,17 @@ template<MutableGraph Graph>
 template<bool requiresSort, bool consolidatePieces, typename T>
 EdgeIx Partition<Graph>::splitByIndices(NodeIx clusterId, const T& values, NodeIx numParts, std::vector<NodeIx>& modified) {
     Cluster& current = clusters[clusterId];
+
+    if constexpr (!requiresSort) {
+        // Without sorting, the cluster's nodes must already be ordered by part index (all of part 0 first, then
+        // part 1, ...), e.g. right after a sweep cut. Otherwise the clusters get the wrong nodes.
+        NodeIx previousPart = 0;
+        for (const ClusterVertex& cv : current) {
+            assert(static_cast<NodeIx>(values[cv.nix]) >= previousPart && "splitByIndices<false>: nodes are not grouped by part, use requiresSort = true");
+            previousPart = static_cast<NodeIx>(values[cv.nix]);
+        }
+    }
+
     std::vector<Cluster> others(numParts, {0, 0, 0, 0, this});
     std::vector<NodeIx> counts(numParts);
     EdgeIx extraCutEdges = 0;
