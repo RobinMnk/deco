@@ -86,6 +86,7 @@ void disableEdgesKernel_node(
     NodeIx* __restrict__ neighbors,
     const EdgeIx* __restrict__ ranges,
     const EdgeIx* __restrict__ degrees,
+    const DevEdgeWeight* __restrict__ weights,   // nullptr for unweighted graphs
     EdgeIx* __restrict__ internalDegrees,
     const double* __restrict__ dist,
     double* __restrict__ normDist
@@ -134,7 +135,7 @@ void disableEdgesKernel_node(
             neighbors[j] = INVALID_EDGE;
             // printf("Disabling edge %d -> %d\t[eix: %d]\n", nix, nb, j);
         } else {
-            deg++;
+            deg += edgeWeight(weights, j);
         }
     }
 
@@ -273,7 +274,8 @@ public:
 
     Timer t, t2;
 
-    explicit PartitionManager(GraphManager& gm) :
+    // hostWeightedDegrees: weighted degree of every node (host memory), empty for unweighted graphs
+    PartitionManager(GraphManager& gm, std::span<const EdgeIx> hostWeightedDegrees) :
         numNodes(gm.n),
         totalEdges(2*gm.m),
         // partition1(gm.n),
@@ -308,8 +310,15 @@ public:
         //     partition1.begin(),
         //     InitFunctor(thrust::raw_pointer_cast(gm.getRanges().data()))
         // );
-        auto& ranges = gm.getRanges();
-        thrust::transform(ranges.begin() + 1, ranges.end(), ranges.begin(), allInternalDegrees.begin(), thrust::minus<EdgeIx>());
+
+        // no edge is disabled yet -> internal degree == weighted degree
+        if (hostWeightedDegrees.empty()) {
+            // unweighted: weighted degree == number of edges, already computed on the GPU
+            thrust::copy(gm.getDegrees().begin(), gm.getDegrees().end(), allInternalDegrees.begin());
+        } else {
+            // weighted: the host graph already stores the weighted degrees -> upload them
+            thrust::copy(hostWeightedDegrees.data(), hostWeightedDegrees.data() + hostWeightedDegrees.size(), allInternalDegrees.begin());
+        }
 
 
         const EdgeIx* rangesPtr = thrust::raw_pointer_cast(gm.getRanges().data());
@@ -533,6 +542,7 @@ public:
             neighborsPtr,
             rangesPtr,
             degreesPtr,
+            gm.weightsPtr(),
             internalDegsPtr,
             dist,
             normDist
@@ -871,7 +881,8 @@ public:
         return {labels, num_unique };
     }
 
-    void checkInvariants(GraphManager& gm, Graph& gr) {
+    template <typename T>
+    void checkInvariants(GraphManager& gm, CsrGraph<T> gr) {
         thrust::host_vector<LabeledNode> lNodes = activeNodes;
         thrust::host_vector<label_t> labels = allLabels;
 

@@ -121,6 +121,7 @@ void fusedRandomWalk_WarpParallel(
     const NodeIx* __restrict__ neighbors,
     const EdgeIx* __restrict__ ranges,
     const EdgeIx* __restrict__ degrees,
+    const DevEdgeWeight* __restrict__ weights,   // nullptr for unweighted graphs
     const EdgeIx* __restrict__ clusterDegrees,
     const double* __restrict__ dist,
     double* __restrict__ new_dist,
@@ -175,7 +176,7 @@ void fusedRandomWalk_WarpParallel(
         }
 #endif
         // dist[nb] / clusterDegrees[nb] is precomputed in normDist -> a single gather per edge
-        local_sum += __ldg(&normDist[nb]);
+        local_sum += static_cast<double>(edgeWeight(weights, j)) * __ldg(&normDist[nb]);
     }
 
     // 3. Warp Reduction
@@ -364,7 +365,7 @@ class RandomWalkManager {
     // int maxLabel{0};
 
 public:
-    explicit RandomWalkManager(GraphManager& gm) :
+    RandomWalkManager(GraphManager& gm, const thrust::device_vector<EdgeIx>& internalDegrees) :
         dist1(gm.n), dist2(gm.n),
         dist(thrust::raw_pointer_cast(dist1.data()),
                thrust::raw_pointer_cast(dist2.data())),
@@ -373,7 +374,7 @@ public:
                  thrust::raw_pointer_cast(norm2.data())),
         numNodes(gm.n)
     {
-        initRandomWalk(gm, randSeed);
+        initRandomWalk(thrust::raw_pointer_cast(internalDegrees.data()), randSeed);
         // prepare_cub();
     }
 
@@ -404,6 +405,7 @@ public:
             thrust::raw_pointer_cast(gm.getNeighbors().data()),
             thrust::raw_pointer_cast(gm.getRanges().data()),
             thrust::raw_pointer_cast(gm.getDegrees().data()),
+            gm.weightsPtr(),
             thrust::raw_pointer_cast(allInternalDegrees.data()),
             dist.Current(),
             dist.Alternate(),
@@ -532,9 +534,7 @@ private:
     //     cudaMalloc(&d_temp_storage, temp_storage_bytes);
     // }
 
-    void initRandomWalk(GraphManager& gm, unsigned int s) {
-        const EdgeIx* degreesPtr = thrust::raw_pointer_cast(gm.getDegrees().data());
-
+    void initRandomWalk(const EdgeIx* degreesPtr, unsigned int s) {
         thrust::transform(
             thrust::device,
             thrust::make_counting_iterator<NodeIx>(0),
@@ -543,7 +543,6 @@ private:
               NormalDistributionFunctor(s, degreesPtr)
         );
 
-        // initially, all edges are active -> internal degree == CSR degree
         thrust::transform(
             thrust::device,
             dist.Current(), dist.Current() + numNodes,

@@ -21,8 +21,14 @@ public:
     CudaDeviceManager(const CudaDeviceManager&) = delete;
     CudaDeviceManager& operator=(const CudaDeviceManager&) = delete;
 
-    void initialize(const Graph& graph);
-    Graph downloadGraph();
+    // Precondition for weighted graphs: weights are positive and the total volume (2 * sum of weights) fits EdgeIx,
+    // since all degrees, volumes and cuts are 32-bit on the GPU. Graphs contracted from an unweighted graph always
+    // satisfy this, as contraction never increases the total weight.
+    void initialize(const CsrGraph<>& graph);                // unweighted
+    void initialize(const CsrGraph<DevEdgeWeight>& graph);   // weighted
+
+    CsrGraph<> downloadGraph();                      // structure only
+    std::vector<DevEdgeWeight> downloadWeights();    // one per directed edge, empty for unweighted graphs
     std::vector<EdgeIx> downloadDegrees();
     std::vector<NodeData> downloadPartition();
 

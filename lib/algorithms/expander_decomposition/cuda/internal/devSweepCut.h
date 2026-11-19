@@ -24,6 +24,7 @@ void nodeDiffKernel_Sparse_WarpParallel(
     const NodeIx* __restrict__ neighbors,
     const EdgeIx* __restrict__ ranges,
     const EdgeIx* __restrict__ degrees,
+    const DevEdgeWeight* __restrict__ weights,   // nullptr for unweighted graphs
     const EdgeIx* __restrict__ clusterDegrees,
     const label_t* __restrict__ labels,
     const uint64_t* __restrict__ packedKeys,
@@ -92,7 +93,8 @@ void nodeDiffKernel_Sparse_WarpParallel(
             isBefore = nb < nix;
         }
 
-        nodeContribution += isBefore ? -1 : 1;
+        const auto w = static_cast<int32_t>(edgeWeight(weights, j));
+        nodeContribution += isBefore ? -w : w;
 
         // if (nix == 7) {
         //     printf("\tnix 7: edge -> %d adds %d. Running total: %d\tmyKey %llu and nbKey:%llu\n", nb, isBefore ? -1 : 1, nodeContribution, myKey, nbKey);
@@ -493,6 +495,7 @@ inline void SweepCutManager::prepare_nodes(GraphManager& gm, PartitionManager& p
         thrust::raw_pointer_cast(gm.getNeighbors().data()),
         thrust::raw_pointer_cast(gm.getRanges().data()),
         thrust::raw_pointer_cast(gm.getDegrees().data()),
+        gm.weightsPtr(),
         thrust::raw_pointer_cast(pm.getAllInternalDegrees().data()),
          thrust::raw_pointer_cast(pm.getAllLabels().data()),
         packedKeys.Current(),

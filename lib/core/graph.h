@@ -220,6 +220,24 @@ public:
     }
 
     [[nodiscard]]
+    std::span<const EdgeWeight> edgeWeights() const noexcept {
+        if constexpr (std::same_as<Policy, Unweighted>) {
+            return {};
+        } else {
+            return weights.weights_;
+        }
+    }
+
+    [[nodiscard]]
+    std::span<const EdgeWeight> weightedDegrees() const noexcept {
+        if constexpr (std::same_as<Policy, Unweighted>) {
+            return {};
+        } else {
+            return weights.degrees_;
+        }
+    }
+
+    [[nodiscard]]
     EdgeWeight weightedDegree(NodeIx node) const noexcept {
         if constexpr (std::same_as<Policy, Unweighted>) {
             return degree(node);

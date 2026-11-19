@@ -129,11 +129,18 @@ void compactActiveEdgesKernel(
     }
 }
 
+__device__ __forceinline__
+DevEdgeWeight edgeWeight(const DevEdgeWeight* __restrict__ weights, const EdgeIx eix) {
+    return weights ? __ldg(&weights[eix]) : 1u;
+}
+
+
 class GraphManager {
     // Graph
     thrust::device_vector<NodeIx> neighbors;
     thrust::device_vector<EdgeIx> ranges;
     thrust::device_vector<EdgeIx> degrees;
+    thrust::device_vector<DevEdgeWeight> weights;    // one per directed edge (same layout as neighbors), empty for unweighted graphs
 
     thrust::device_vector<NodeIx> nodeLookup;
 
@@ -167,10 +174,12 @@ public:
 
     NodeIx numClusters{1};
 
-    explicit GraphManager(const Graph& graph) :
+    template<CudaGraph GraphT>
+    explicit GraphManager(const GraphT& graph) :
         neighbors(graph.edges),
         ranges(graph.ranges),
         degrees(graph.numNodes),
+        weights(graph.edgeWeights().data(), graph.edgeWeights().data() + graph.edgeWeights().size()),  // empty for unweighted graphs
         // nodeLookup(2*graph.numEdges),
         n(graph.numNodes),
         m(graph.numEdges)
@@ -205,6 +214,17 @@ public:
 
     thrust::device_vector<EdgeIx>& getDegrees() {
         return degrees;
+    }
+
+    // nullptr for unweighted graphs
+    [[nodiscard]] const DevEdgeWeight* weightsPtr() const {
+        return weights.empty() ? nullptr : thrust::raw_pointer_cast(weights.data());
+    }
+
+    [[nodiscard]] std::vector<DevEdgeWeight> downloadWeights() const {
+        std::vector<DevEdgeWeight> w(weights.size());
+        thrust::copy(weights.begin(), weights.end(), w.begin());
+        return w;
     }
 
     [[nodiscard]] EdgeIx storedDirectedEdges() const {
@@ -267,8 +287,8 @@ public:
 //        return degrees;
 //    }
 
-    Graph downloadGraph() {
-        Graph g(n, m);
+    CsrGraph<> downloadGraph() {
+        CsrGraph g(n, m);
         thrust::copy(neighbors.begin(), neighbors.end(), g.edges.begin());
         thrust::copy(ranges.begin(), ranges.end(), g.ranges.begin());
         // thrust::copy(edgeMap.begin(), edgeMap.end(), g.map.begin());

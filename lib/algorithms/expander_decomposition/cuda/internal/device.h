@@ -19,7 +19,8 @@ struct CudaDeviceManager::Impl {
     std::unique_ptr<SweepCutManager> sc;
     std::unique_ptr<ConsolidationManager> cm;
 
-    void initialize(const Graph& graph) {
+    template<CudaGraph GraphT>
+    void initialize(const GraphT& graph) {
         gm.reset();
         pt.reset();
         rw.reset();
@@ -28,8 +29,8 @@ struct CudaDeviceManager::Impl {
 
         gm = std::make_unique<GraphManager>(graph);
         sc = std::make_unique<SweepCutManager>(graph.numNodes);
-        pt = std::make_unique<PartitionManager>(*gm);
-        rw = std::make_unique<RandomWalkManager>(*gm);
+        pt = std::make_unique<PartitionManager>(*gm, graph.weightedDegrees());
+        rw = std::make_unique<RandomWalkManager>(*gm, pt->getAllInternalDegrees());
         cm = std::make_unique<ConsolidationManager>(graph.numNodes, 2 * graph.numEdges);
     }
 
@@ -188,8 +189,12 @@ struct CudaDeviceManager::Impl {
         gm->updateLabels(nodeLabels, activeClusters);
     }
 
-    Graph downloadGraph() {
+    CsrGraph<> downloadGraph() {
         return gm->downloadGraph();
+    }
+
+    std::vector<DevEdgeWeight> downloadWeights() {
+        return gm->downloadWeights();
     }
 
     void printInf(
@@ -392,9 +397,11 @@ CudaDeviceManager::CudaDeviceManager() : impl(std::make_unique<Impl>()) {}
 
 CudaDeviceManager::~CudaDeviceManager() = default;
 
-void CudaDeviceManager::initialize(const Graph &graph) { impl->initialize(graph); }
+void CudaDeviceManager::initialize(const CsrGraph<> &graph) { impl->initialize(graph); }
+void CudaDeviceManager::initialize(const CsrGraph<DevEdgeWeight> &graph) { impl->initialize(graph); }
 
-Graph CudaDeviceManager::downloadGraph() { return impl->downloadGraph(); }
+CsrGraph<> CudaDeviceManager::downloadGraph() { return impl->downloadGraph(); }
+std::vector<DevEdgeWeight> CudaDeviceManager::downloadWeights() { return impl->downloadWeights(); }
 
 std::vector<frac_t> CudaDeviceManager::readRandomWalkValues() { return impl->readRandomWalkValues(); }
 std::vector<EdgeIx> CudaDeviceManager::downloadDegrees() { return impl->downloadDegrees(); }

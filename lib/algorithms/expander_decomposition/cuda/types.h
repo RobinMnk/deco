@@ -8,10 +8,19 @@
 #include "core/definitions.h"
 #include "core/graph.h"
 
+#include <concepts>
 #include <cstdint>
 #include <vector>
 
-using Graph = CsrGraph<>;
+// using Graph = CsrGraph<>;
+
+using DevEdgeWeight = uint32_t;
+
+// Graph types the CUDA implementation accepts
+template<class G>
+concept CudaGraph =
+    std::same_as<G, CsrGraph<>> ||              // unweighted
+    std::same_as<G, CsrGraph<DevEdgeWeight>>;   // weighted, e.g. contracted levels of an unweighted graph
 
 using label_t = int32_t;
 

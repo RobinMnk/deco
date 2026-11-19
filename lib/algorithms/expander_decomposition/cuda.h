@@ -8,12 +8,11 @@
 #include "config.h"
 #include "core/partition.h"
 #include "cuda/interface.h"
-
-// template<Strategy strategy = {}, MutableGraph Graph>
-//     Partition<Graph> compute(Graph& graph,
+#include "utils/timer.h"
 
 
-inline Partition<Graph> cudaExpanderDecomposition(Graph& graph, const Config& = {}) {
+template<CudaGraph GraphT>
+Partition<GraphT> cudaExpanderDecomposition(GraphT& graph, const Config& = {}) {
     Timer t;
     t.start();
     CudaDeviceManager cuda;
@@ -22,11 +21,11 @@ inline Partition<Graph> cudaExpanderDecomposition(Graph& graph, const Config& = 
     auto millis = t.timeMillis();
 
     FinalPartition finalPartition = cuda.getFinalPartition();
-    Partition<Graph> partition{graph};
+    Partition<GraphT> partition{graph};
     std::vector<NodeIx> modified;
     partition.template splitByIndices<false, false>(0, finalPartition.clusterIds, finalPartition.numClusters, modified);
 
-    printf("time: %lld\nnumClusters: %d\ncutEdges: %d\nnodes: %d\nedges: %d\n", millis, partition.numClusters(), partition.getNumCutEdges(), graph.numNodes, graph.numEdges);
+    printf("time: %lld\nnumClusters: %d\ncutEdges: %d\ncutWeight: %llu\nnodes: %d\nedges: %d\n", millis, partition.numClusters(), partition.getNumCutEdges(), static_cast<unsigned long long>(partition.getCutSize()), graph.numNodes, graph.numEdges);
 
 
     return partition;
