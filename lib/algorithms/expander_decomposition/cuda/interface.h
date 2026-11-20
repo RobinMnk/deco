@@ -6,6 +6,7 @@
 #define PAREX_INTERFACE_H
 
 #include "algorithms/expander_decomposition/cuda/types.h"
+#include "algorithms/expander_decomposition/config.h"
 #include <memory>
 
 struct NodeUpdate {
@@ -24,8 +25,8 @@ public:
     // Precondition for weighted graphs: weights are positive and the total volume (2 * sum of weights) fits EdgeIx,
     // since all degrees, volumes and cuts are 32-bit on the GPU. Graphs contracted from an unweighted graph always
     // satisfy this, as contraction never increases the total weight.
-    void initialize(const CsrGraph<>& graph);                // unweighted
-    void initialize(const CsrGraph<DevEdgeWeight>& graph);   // weighted
+    void initialize(const CsrGraph<>& graph, const Config& config = {});                // unweighted
+    void initialize(const CsrGraph<DevEdgeWeight>& graph, const Config& config = {});   // weighted
 
     CsrGraph<> downloadGraph();                      // structure only
     std::vector<DevEdgeWeight> downloadWeights();    // one per directed edge, empty for unweighted graphs
@@ -43,7 +44,8 @@ public:
 
     EdgeIx getNumCutEdges();
 
-    void expanderDecomposition();
+    void expanderDecomposition();   // runs until every cluster is done
+    size_t getNumIterations();      // of the last expanderDecomposition()
 
     FinalPartition getFinalPartition();
 

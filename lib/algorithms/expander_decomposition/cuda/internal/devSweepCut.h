@@ -224,7 +224,7 @@ class SweepCutManager {
 
     inline void prepare_nodes(GraphManager& gm, PartitionManager& pm, const double* dist);
 
-    inline void compute_sweep_cuts(GraphManager& gm, PartitionManager& pm);
+    inline void compute_sweep_cuts(GraphManager& gm, PartitionManager& pm, double sparsityThreshold);
 
     void checkInvariants(PartitionManager&);
 
@@ -261,7 +261,7 @@ public:
         return sweepCutsBuffer;
     }
 
-    void compute(GraphManager& gm, PartitionManager& pm, const double* dist);
+    void compute(GraphManager& gm, PartitionManager& pm, const double* dist, double sparsityThreshold);
 
 
     cub::DoubleBuffer<uint64_t>& getKeyBuffer() {
@@ -561,7 +561,7 @@ inline void SweepCutManager::prepare_nodes(GraphManager& gm, PartitionManager& p
 }
 
 
-inline void SweepCutManager::compute_sweep_cuts(GraphManager& gm, PartitionManager& pm) {
+inline void SweepCutManager::compute_sweep_cuts(GraphManager& gm, PartitionManager& pm, double sparsityThreshold) {
     auto lNodesPtr = thrust::device_pointer_cast(pm.getActiveNodes().data());
 
     const auto iter_begin = thrust::make_transform_iterator(lNodesPtr, LabelExtractor());
@@ -675,7 +675,7 @@ inline void SweepCutManager::compute_sweep_cuts(GraphManager& gm, PartitionManag
 
 
 
-    const double threshold = sc_threshold;
+    const double threshold = sparsityThreshold;
 
     // Ignore all sweep Cuts that have a sparsity above the threshold
     auto end_iter = thrust::copy_if(
@@ -739,12 +739,12 @@ inline void SweepCutManager::checkInvariants(PartitionManager& pm) {
 }
 
 
-inline void SweepCutManager::compute(GraphManager& gm, PartitionManager& pm, const double* dist) {
+inline void SweepCutManager::compute(GraphManager& gm, PartitionManager& pm, const double* dist, double sparsityThreshold) {
     prepare_nodes(gm, pm, dist);
 
     // checkInvariants(pm);
 
-    compute_sweep_cuts(gm, pm);
+    compute_sweep_cuts(gm, pm, sparsityThreshold);
 }
 
 

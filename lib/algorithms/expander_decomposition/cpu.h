@@ -8,6 +8,7 @@
 #include "config.h"
 #include "core/partition.h"
 #include "random_walk.h"
+#include "utils/timer.h"
 
 #include <numeric>
 
@@ -25,8 +26,10 @@ namespace expander_decomposition {
 
 
     template<Strategy strategy = {}, MutableGraph Graph>
-    Partition<Graph> compute(Graph& graph, const Config& config = {}) {
-        RandomWalk walk{graph};
+    Partition<Graph> compute(Graph& graph, const Config& config = {}, DecompositionStats* stats = nullptr) {
+        Timer timer;
+        timer.start();
+        RandomWalk walk{graph, config.seed};
         Partition decomposition{graph};
 
         std::vector<NodeIx> active, next(decomposition.numClusters());
@@ -65,8 +68,7 @@ namespace expander_decomposition {
                 // walk.recenterCluster(current);
 
                 if(std::abs(walk.averageOf(current)) > config.randomWalkThreshold) {
-                    std::cout << "Cluster average: " << std::abs(walk.averageOf(current)) << std::endl;
-                    WARN("\nCLUSTER CAN NEVER CONVERGE!!!\n");
+                    WARN("cluster " << clusterId << " can never converge, the average of its walk values is " << walk.averageOf(current));
                 }
 
                 LOG("  working on cluster " << clusterId << "\t (" << current.size() << " nodes, potential: " << walk.potential(current) << ")");
@@ -132,7 +134,10 @@ namespace expander_decomposition {
             }
         }
 
-        printf("iterations: %llu\n", iterations);
+        if (stats) {
+            stats->iterations = iterations;
+            stats->seconds = timer.timeSeconds();
+        }
 
         return decomposition;
     }

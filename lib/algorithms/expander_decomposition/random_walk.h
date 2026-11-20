@@ -8,12 +8,6 @@
 #include "core/partition.h"
 #include <random>
 
-inline std::mt19937 random_source{11};
-
-
-// // const frac_t rw_stay = 0.1;
-// extern std::mt19937 random_source;
-
 template<MutableGraph Graph>
 class RandomWalk {
 
@@ -21,9 +15,10 @@ class RandomWalk {
     std::vector<frac_t> m_old_distribution;
 
     const Graph& G;
+    std::mt19937 rng;   // random initial values
 
 public:
-    explicit RandomWalk (const Graph& gr) : m_distribution(gr.numNodes), m_old_distribution(gr.numNodes), G(gr) {
+    explicit RandomWalk(const Graph& gr, unsigned seed) : m_distribution(gr.numNodes), m_old_distribution(gr.numNodes), G(gr), rng(seed) {
         init_distribution(gr);
     }
 
@@ -42,7 +37,7 @@ public:
             // generate a normal distributed number
             auto deg = gr.weightedDegree(i);
             std::normal_distribution<>::param_type stdev(0.0, std::sqrt(static_cast<frac_t>(deg)));
-            frac_t x = normal_distribution(random_source, stdev);
+            frac_t x = normal_distribution(rng, stdev);
             m_distribution[i] = x;
 
             avg += (x - avg) / (static_cast<frac_t >(i) + 1.0);
@@ -59,7 +54,7 @@ public:
         int i = 1;
 
         for (const ClusterVertex<Graph>& cn: cluster) {
-            auto x = normal_distribution(random_source);
+            auto x = normal_distribution(rng);
             m_distribution[cn.nix] = x;
             avg += (x - avg) / static_cast<frac_t >(i);
             i++;

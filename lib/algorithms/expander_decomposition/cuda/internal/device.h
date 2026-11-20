@@ -10,7 +10,6 @@
 #include "devRandomWalk.h"
 #include "devSweepCut.h"
 #include "devPartition.h"
-#include "utils/timer.h"
 
 struct CudaDeviceManager::Impl {
     std::unique_ptr<GraphManager> gm;
@@ -18,9 +17,13 @@ struct CudaDeviceManager::Impl {
     std::unique_ptr<RandomWalkManager> rw;
     std::unique_ptr<SweepCutManager> sc;
     std::unique_ptr<ConsolidationManager> cm;
+    Config config;
+    size_t numIterations = 0;
 
     template<CudaGraph GraphT>
-    void initialize(const GraphT& graph) {
+    void initialize(const GraphT& graph, const Config& cfg) {
+        config = cfg;
+        numIterations = 0;
         gm.reset();
         pt.reset();
         rw.reset();
@@ -30,7 +33,7 @@ struct CudaDeviceManager::Impl {
         gm = std::make_unique<GraphManager>(graph);
         sc = std::make_unique<SweepCutManager>(graph.numNodes);
         pt = std::make_unique<PartitionManager>(*gm, graph.weightedDegrees());
-        rw = std::make_unique<RandomWalkManager>(*gm, pt->getAllInternalDegrees());
+        rw = std::make_unique<RandomWalkManager>(*gm, pt->getAllInternalDegrees(), config.seed);
         cm = std::make_unique<ConsolidationManager>(graph.numNodes, 2 * graph.numEdges);
     }
 
@@ -73,7 +76,7 @@ struct CudaDeviceManager::Impl {
 
     void computeSweepCuts() const {
         sc->compute(
-            *gm, *pt, rw->getValues()
+            *gm, *pt, rw->getValues(), config.targetSparsity
         );
     }
 
@@ -101,7 +104,7 @@ struct CudaDeviceManager::Impl {
         // inspect(pt->getUniqueActiveLabels(), pt->numActiveClusters);
 
         if (sc->numClustersWithCut > 0) {
-            pt->cutClusters(sc->getScNodeData(), sc->getSweepCuts(), sc->numClustersWithCut);
+            pt->cutClusters(sc->getScNodeData(), sc->getSweepCuts(), sc->numClustersWithCut, config.targetSparsity);
             // fflush(stdout);
         }
 
@@ -133,7 +136,7 @@ struct CudaDeviceManager::Impl {
 
         // inspect(pt->getUniqueActiveLabels(), pt->numActiveClusters);
 
-        pt->recenterAndDeactivateClusters(rw->getValues());
+        pt->recenterAndDeactivateClusters(rw->getValues(), config.randomWalkThreshold);
 
         // inspect(pt->getUniqueActiveLabels(), pt->numActiveClusters);
         // fp = getFinalPartition();
@@ -307,16 +310,14 @@ void CudaDeviceManager::Impl::expanderDecomposition() {
     // std::vector<SweepCutData> scs(gm->n);
     // std::vector<NodeData> nodes(gm->n);
 
-    int i = 0;
-    const int MAX_NUM_ITER = 200000;
+    size_t iterations = 0;
+    constexpr size_t MAX_NUM_ITER = 200000;
     // const int NUM_RW_STEPS = 4;
 
     // int walkReset = 128;
 
-    std::cout << "Begin CUDA Expander Decomposition" << std::endl;
-    Timer t;
-    t.start();
-    while (i++ < MAX_NUM_ITER && pt->numActiveClusters > 0 && pt->numActiveNodes > 0) {
+    while (iterations < MAX_NUM_ITER && pt->numActiveClusters > 0 && pt->numActiveNodes > 0) {
+        ++iterations;
         // std::cout << "==================================================================================== \nBegin Iteration: " <<  (i) << std::endl;
 
         // #pragma unroll
@@ -342,14 +343,9 @@ void CudaDeviceManager::Impl::expanderDecomposition() {
         // std::cout << ("Adjust Partition") << std::endl;
         cutClusters();
     }
-    if (i >= MAX_NUM_ITER) {
-        printf("Not terminating. ABORT.\n");
+    if (pt->numActiveClusters > 0 && pt->numActiveNodes > 0) {
+        WARN("CUDA expander decomposition stopped after " << MAX_NUM_ITER << " iterations without finishing");
     }
-
-
-    auto tm = t.timeSeconds();
-    // printf("%d iterations with %fs per iteration\n", i, (float) tm / i);
-    printf("==================================================================================== \niterations: %d\n", i);
 
     // auto fp = getFinalPartition();
     // for (int ix = 0; ix < gm->n; ix++) {
@@ -388,6 +384,8 @@ void CudaDeviceManager::Impl::expanderDecomposition() {
         // pt->computeActiveDegrees(*gm);
 
     // }
+
+    numIterations = iterations;
 }
 
 
@@ -397,8 +395,8 @@ CudaDeviceManager::CudaDeviceManager() : impl(std::make_unique<Impl>()) {}
 
 CudaDeviceManager::~CudaDeviceManager() = default;
 
-void CudaDeviceManager::initialize(const CsrGraph<> &graph) { impl->initialize(graph); }
-void CudaDeviceManager::initialize(const CsrGraph<DevEdgeWeight> &graph) { impl->initialize(graph); }
+void CudaDeviceManager::initialize(const CsrGraph<> &graph, const Config& config) { impl->initialize(graph, config); }
+void CudaDeviceManager::initialize(const CsrGraph<DevEdgeWeight> &graph, const Config& config) { impl->initialize(graph, config); }
 
 CsrGraph<> CudaDeviceManager::downloadGraph() { return impl->downloadGraph(); }
 std::vector<DevEdgeWeight> CudaDeviceManager::downloadWeights() { return impl->downloadWeights(); }
@@ -413,6 +411,7 @@ void CudaDeviceManager::computeSweepCuts() { impl->computeSweepCuts(); }
 void CudaDeviceManager::cutClusters() { impl->cutClusters(); }
 
 void CudaDeviceManager::expanderDecomposition() { impl->expanderDecomposition(); }
+size_t CudaDeviceManager::getNumIterations() { return impl->numIterations; }
 
 AllSweepCuts CudaDeviceManager::readSweepCuts() { return impl->getSweepCuts(); }
 

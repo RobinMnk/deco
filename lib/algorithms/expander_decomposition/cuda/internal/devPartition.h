@@ -603,14 +603,15 @@ public:
     void cutClusters(
         cub::DoubleBuffer<NodeData>& scNodeData,
         const thrust::device_vector<SweepCutData>& sweepCuts,
-        size_t numClustersWithCut
+        size_t numClustersWithCut,
+        double sparsityThreshold   // only for a sanity check: every cut that arrives here is below it
     ) {
         const SweepCutData* sweepCutPtr = thrust::raw_pointer_cast(sweepCuts.data());
         const NodeData* scNodeDataPtr = scNodeData.Current();
         LabeledNode* labeledNodesPtr = thrust::raw_pointer_cast(activeNodes.data());
         label_t* allLabelsPtr = thrust::raw_pointer_cast(allLabels.data());
 
-        const float sparsity_target = sc_threshold;
+        const float sparsity_target = sparsityThreshold;
         const label_t* maxLabel = thrust::raw_pointer_cast(clusterLabels.data()) + numActiveClusters - 1;
         const NodeIx clusterCount = numClustersWithCut;
 
@@ -679,7 +680,7 @@ public:
         );
     }
 
-    void recenterAndDeactivateClusters(double* dist) {
+    void recenterAndDeactivateClusters(double* dist, double walkThreshold) {
         // subtract average from each (active) node
         const ClusterData* clusterDataPtr = thrust::raw_pointer_cast(clusterData.data());
         const label_t* uniqueLabelsPtr = thrust::raw_pointer_cast(clusterLabels.data());
@@ -687,7 +688,7 @@ public:
         const label_t* clusterNewLabelsPtr = thrust::raw_pointer_cast(clusterNewLabels.data());
         label_t* allLabelsPtr = thrust::raw_pointer_cast(allLabels.data());
 
-        const float walk_threshold = rw_threshold;
+        const float walk_threshold = walkThreshold;
         const NodeIx numClusters = numActiveClusters;
         const NodeIx lookupSize = numNodes;
         const label_t inactiveBase = nextInactiveLabel;

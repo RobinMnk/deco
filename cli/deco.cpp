@@ -20,8 +20,14 @@ void checkBuildMode() {
 }
 
 template<typename T>
-void report(Partition<T>& part, T& G, auto millis) {
-    printf("time: %lld\nnumClusters: %d\ncutEdges: %d\nnodes: %d\nedges: %d\n", millis, part.numClusters(), part.getNumCutEdges(), G.numNodes, G.numEdges);
+void report(Partition<T>& part, const T& G, const DecompositionStats& stats) {
+    std::cout << "iterations: " << stats.iterations << "\n"
+              << "time: " << std::llround(stats.seconds * 1000) << "\n"
+              << "numClusters: " << part.numClusters() << "\n"
+              << "cutEdges: " << part.getNumCutEdges() << "\n"
+              << "cutWeight: " << part.getCutSize() << "\n"
+              << "nodes: " << G.numNodes << "\n"
+              << "edges: " << G.numEdges << std::endl;
 }
 
 template<MutableGraph GraphT>
@@ -36,13 +42,11 @@ void run(GraphT& G) {
     std::cout << "Graph: " << G.numNodes << " nodes, " << G.numEdges
               << " edges, weight type: " << weightType << std::endl;
 
-    Timer t;
-    t.start();
     // auto expDec = buildExpanderHierarchy(G);
-    auto expDec = expander_decomposition::compute(G);
-    auto millis = t.timeMillis();
+    DecompositionStats stats;
+    auto expDec = expander_decomposition::compute(G, Config{}, &stats);
 
-    report(expDec, G, millis);
+    report(expDec, G, stats);
 
     // printf("time: %lldms\nnodes: %d\nedges: %d\n", millis, G.numNodes, G.numEdges);
 
@@ -76,6 +80,8 @@ int main(int argc, char* argv[]) {
 
     #ifdef DECO_ENABLE_CUDA
     auto G = load_mtx_unweighted(filename);
-    auto part = cudaExpanderDecomposition(G);
+    DecompositionStats stats;
+    auto part = cudaExpanderDecomposition(G, Config{}, &stats);
+    report(part, G, stats);
     #endif
 }

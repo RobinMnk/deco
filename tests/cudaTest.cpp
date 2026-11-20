@@ -360,10 +360,11 @@ TYPED_TEST(CudaTest, NumCutEdgesMatchesHost) {
 }
 
 // Quality, as in algorithmsTest: expanders stay whole, and no sparse cut is left inside a cluster.
-// The GPU uses the global threshold sc_threshold.
+// Both backends read their thresholds from Config; decomposeOnGpu uses the defaults.
 
 TYPED_TEST(CudaTest, DecompositionKeepsExpandersWhole) {
-    ASSERT_LT(sc_threshold, 1.0 / 3) << "the cliques have no cut below 1/3, the test needs a lower threshold";
+    const Config config;
+    ASSERT_LT(config.targetSparsity, 1.0 / 3) << "the cliques have no cut below 1/3, the test needs a lower threshold";
     for (const NodeIx size : {5u, 12u, 40u}) {
         SCOPED_TRACE("clique of " + std::to_string(size));
         const auto labels = decomposeOnGpu(makeGraph<TypeParam>(size, expanderClique(size)));
@@ -372,6 +373,7 @@ TYPED_TEST(CudaTest, DecompositionKeepsExpandersWhole) {
 }
 
 TYPED_TEST(CudaTest, DecompositionLeavesNoSparseCut) {
+    const Config config;
     for (const PlantedInstance& instance : plantedInstances) {
         for (unsigned seed = 0; seed < 5; ++seed) {
             SCOPED_TRACE(describe(instance, seed));
@@ -382,7 +384,7 @@ TYPED_TEST(CudaTest, DecompositionLeavesNoSparseCut) {
             auto copy = copyGraph(graph);
             Partition host{copy};
             splitByLabels(host, labels);
-            expectNoSparsePlantedCutLeft(host, instance.size, sc_threshold);
+            expectNoSparsePlantedCutLeft(host, instance.size, config.targetSparsity);
             if (::testing::Test::HasFailure()) return;
         }
     }
@@ -464,7 +466,6 @@ TEST(CudaWeightsTest, ContractedHierarchyLevelsDecomposeConsistently) {
     constexpr NodeIx n = 300;
     auto graph = makeGraph<Unweighted32>(n, randomEdges(n, 1200, 1, 7, true));
 
-    random_source.seed(11);
     auto hierarchy = buildExpanderHierarchy(graph);   // CPU decomposition; levels are CsrGraph<EdgeIx>
     static_assert(std::same_as<std::remove_cvref_t<decltype(hierarchy.lvl(0).graph)>, Weighted32>);
 

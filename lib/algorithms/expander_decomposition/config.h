@@ -16,12 +16,19 @@ struct Strategy {
     bool                    cutWhenConverged{false};
 };
 
-// Configuration for Expander Decomposition
+// Configuration for Expander Decomposition, used by the CPU and the CUDA implementation
 struct Config {
-    frac_t targetSparsity = 0.3;
-    frac_t randomWalkThreshold = 1e-4;
-    size_t initialNumSteps = 1; // initial number of rw steps, before the first sweep cut is made
-    size_t mainNumSteps = 1;
+    frac_t targetSparsity = 0.3;        // a cluster is cut if its sweep cut has sparsity (cut / smaller volume) below this
+    frac_t randomWalkThreshold = 1e-4;  // a cluster is done once its walk values differ by less than this
+    unsigned seed = 11;                 // seed for the initial random-walk values
+    size_t initialNumSteps = 1;         // CPU only: random-walk steps before the first sweep cut
+    size_t mainNumSteps = 1;            // CPU only: random-walk steps between later sweep cuts (CUDA always does 1)
+};
+
+// Statistics of an expander decomposition run
+struct DecompositionStats {
+    size_t iterations = 0;   // rounds of random-walk steps and sweep cuts
+    double seconds = 0;
 };
 
 #endif //RCUT_EXPANDER_DECOMPOSITION_CONFIG_H

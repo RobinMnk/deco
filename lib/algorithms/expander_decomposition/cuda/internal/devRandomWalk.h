@@ -363,7 +363,7 @@ class RandomWalkManager {
     // int maxLabel{0};
 
 public:
-    RandomWalkManager(GraphManager& gm, const thrust::device_vector<EdgeIx>& internalDegrees) :
+    RandomWalkManager(GraphManager& gm, const thrust::device_vector<EdgeIx>& internalDegrees, unsigned seed) :
         dist1(gm.n), dist2(gm.n),
         dist(thrust::raw_pointer_cast(dist1.data()),
                thrust::raw_pointer_cast(dist2.data())),
@@ -372,7 +372,7 @@ public:
                  thrust::raw_pointer_cast(norm2.data())),
         numNodes(gm.n)
     {
-        initRandomWalk(thrust::raw_pointer_cast(internalDegrees.data()), randSeed);
+        initRandomWalk(thrust::raw_pointer_cast(internalDegrees.data()), seed);
         // prepare_cub();
     }
 

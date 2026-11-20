@@ -10,6 +10,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <concepts>
 #include <limits>
 #include <numeric>
 #include <span>
@@ -103,6 +104,7 @@ public:
         std::vector<NodeIx> parents;        // size: numNodes of graph in level below; gives clusterId (= nix of parent) for each nix in the graph below
         std::vector<NodeIx> children;        // packed inverse of parents
         std::vector<EdgeIx> childrenStart;   // size: number of clusters + 1
+        double seconds = 0;                  // time of the expander decomposition that produced this level
 
         [[nodiscard]]
         std::span<const NodeIx> childrenOf(NodeIx parent) const {
@@ -144,8 +146,9 @@ public:
     void build(Decomposer&& decompose);
 
     template<MutableGraph PartGraph>
-    void appendLevel(Partition<PartGraph>& part) {
+    void appendLevel(Partition<PartGraph>& part, double seconds = 0) {
         levels.push_back(contract(part));
+        levels.back().seconds = seconds;
     }
 
     template<class Decomposer>
@@ -278,15 +281,14 @@ void ExpanderHierarchy<EdgeWeight>::buildUpperLevels(Decomposer&& decompose, Con
             continue;
         }
 
-        NodeIx numClusters = ed.numClusters();
-        EdgeIx cutSize = ed.getNumCutEdges();
-
+        const double seconds = t.timeSeconds();
         Level lvl = contract(ed);
+        lvl.seconds = seconds;
         levels.push_back(std::move(lvl));
         current = &levels.back().graph;
+        ++conf.seed;   // fresh random values on every level
 
-        auto timeSpent = t.timeSeconds();
-        WARN("Level " << levels.size() << " (" << timeSpent << "s)\t\t-> " << numClusters << " clusters with " << cutSize << " crossing edges of weight " << ed.getCutSize());
+        INFO("Level " << levels.size() << " (" << seconds << "s)\t\t-> " << ed.numClusters() << " clusters with " << ed.getNumCutEdges() << " crossing edges of weight " << ed.getCutSize());
 
         if (ed.getCutSize() == EdgeWeight{}) {
             // TODO: add single super node on top
@@ -341,11 +343,11 @@ double ExpanderHierarchy<EdgeWeight>::predict(const T& demands) const {
 }
 
 template<MutableGraph InputGraph, class Decomposer>
-ExpanderHierarchy<typename InputGraph::EdgeWeight> buildExpanderHierarchy(InputGraph& graph, Decomposer&& decompose) {
+    requires std::invocable<Decomposer&, InputGraph&, const Config&>
+ExpanderHierarchy<typename InputGraph::EdgeWeight> buildExpanderHierarchy(InputGraph& graph, Decomposer&& decompose, Config conf = {}) {
     using EdgeWeight = typename InputGraph::EdgeWeight;
 
     ExpanderHierarchy<EdgeWeight> hierarchy{graph.numNodes};
-    Config conf{};
 
     while (true) {
         Timer t;
@@ -358,24 +360,26 @@ ExpanderHierarchy<typename InputGraph::EdgeWeight> buildExpanderHierarchy(InputG
             continue;
         }
 
-        auto timeSpent = t.timeSeconds();
-        WARN("Level 1 (" << timeSpent << "s)\t\t-> " << first.numClusters() << " clusters with " << first.getNumCutEdges() << " crossing edges of weight " << first.getCutSize());
+        const double seconds = t.timeSeconds();
+        INFO("Level 1 (" << seconds << "s)\t\t-> " << first.numClusters() << " clusters with " << first.getNumCutEdges() << " crossing edges of weight " << first.getCutSize());
 
-        hierarchy.appendLevel(first);
+        hierarchy.appendLevel(first, seconds);
         break;
     }
 
+    ++conf.seed;   // fresh random values on every level
     hierarchy.buildUpperLevels(std::forward<Decomposer>(decompose), conf);
     return hierarchy;
 }
 
 template<MutableGraph InputGraph>
-ExpanderHierarchy<typename InputGraph::EdgeWeight> buildExpanderHierarchy(InputGraph& graph) {
+ExpanderHierarchy<typename InputGraph::EdgeWeight> buildExpanderHierarchy(InputGraph& graph, const Config& config = {}) {
     return buildExpanderHierarchy(
         graph,
-        [](auto& current, const Config& config) {
-            return expander_decomposition::compute(current, config);
-        }
+        [](auto& current, const Config& levelConfig) {
+            return expander_decomposition::compute(current, levelConfig);
+        },
+        config
     );
 }
 

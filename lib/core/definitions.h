@@ -10,16 +10,17 @@
 #include <bit>
 #include <cmath>
 
+// Diagnostics go to stderr, so that stdout only carries results
 #ifdef DEBUG
 #include <iostream>
-#define INFO(msg) (std::cout << "[INFO] " << msg << std::endl)
-#define LOG(msg) (std::cout << "[LOG] " << msg << std::endl)
-#define WARN(msg) (std::cout << "[WARNING] " << msg << "!" << std::endl)
+#define INFO(msg) (std::cerr << "[INFO] " << msg << std::endl)
+#define LOG(msg) (std::cerr << "[LOG] " << msg << std::endl)
+#define WARN(msg) (std::cerr << "[WARNING] " << msg << "!" << std::endl)
 #else
 #include <iostream>
 #define INFO(msg) ((void)0)
 #define LOG(msg) ((void)0)
-#define WARN(msg) (std::cout << "[WARNING] " << msg << "!" << std::endl)
+#define WARN(msg) (std::cerr << "[WARNING] " << msg << "!" << std::endl)
 #endif
 
 using NodeIx        = uint32_t;
@@ -27,11 +28,7 @@ using EdgeIx        = uint32_t;
 using frac_t        = double;
 using IntWeight     = int64_t;
 
-inline unsigned int randSeed{11};
-
-constexpr double rw_stay = 0.1;
-inline frac_t rw_threshold = 1e-4;
-inline float sc_threshold = 0.3;
+constexpr double rw_stay = 0.1;   // the thresholds and the random seed are in Config (expander_decomposition/config.h)
 
 constexpr NodeIx INVALID_EDGE = static_cast<NodeIx>(-1);
 

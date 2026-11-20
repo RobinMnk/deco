@@ -30,7 +30,6 @@ TYPED_TEST(AlgorithmsTest, CpuDecompositionGivesConsistentConnectedClusters) {
         auto graph = makeGraph<TypeParam>(60, plantedClusters(6, 10, 10, seed));
         const auto snapshot = adjacencySnapshot(graph);
 
-        random_source.seed(11);
         const auto result = expander_decomposition::compute(graph);
 
         expectPartitionConsistent(result, &snapshot);
@@ -50,14 +49,13 @@ TYPED_TEST(AlgorithmsTest, CpuDecompositionKeepsExpandersWhole) {
         SCOPED_TRACE("clique of " + std::to_string(size));
         auto graph = makeGraph<TypeParam>(size, expanderClique(size));
 
-        random_source.seed(11);
-        const auto result = expander_decomposition::compute(graph);
+        const auto result = expander_decomposition::compute(graph, config);
         EXPECT_EQ(result.numClusters(), 1u);
     }
 }
 
 TYPED_TEST(AlgorithmsTest, CpuDecompositionLeavesNoSparseCut) {
-    const Config config;
+    Config config;
     const double threshold = config.targetSparsity;
     for (const PlantedInstance& instance : plantedInstances) {
         for (unsigned seed = 0; seed < 5; ++seed) {
@@ -65,8 +63,8 @@ TYPED_TEST(AlgorithmsTest, CpuDecompositionLeavesNoSparseCut) {
             auto graph = makeGraph<TypeParam>(instance.clusters * instance.size,
                                               plantedClusters(instance.clusters, instance.size, instance.bridges, seed));
 
-            random_source.seed(11 + seed);
-            const auto result = expander_decomposition::compute(graph);
+            config.seed = 11 + seed;
+            const auto result = expander_decomposition::compute(graph, config);
 
             expectNoSparsePlantedCutLeft(result, instance.size, threshold);
             if (::testing::Test::HasFailure()) return;
@@ -80,9 +78,7 @@ TEST(CpuDecompositionTest, AllOnesWeightsGiveTheSamePartitionAsUnweighted) {
     auto unweighted = makeGraph<Unweighted32>(50, edges);
     auto weighted = makeGraph<Weighted32>(50, edges);
 
-    random_source.seed(11);
     const auto pu = expander_decomposition::compute(unweighted);
-    random_source.seed(11);
     const auto pw = expander_decomposition::compute(weighted);
 
     EXPECT_EQ(clusterLabels(pu), clusterLabels(pw));
@@ -112,7 +108,6 @@ TYPED_TEST(AlgorithmsTest, ExpanderHierarchyLevelsAreConsistent) {
     constexpr NodeIx n = 200;
     auto graph = makeGraph<TypeParam>(n, randomEdges(n, 800, 9, 41, true));
 
-    random_source.seed(11);
     auto hierarchy = buildExpanderHierarchy(graph);
 
     expectHierarchyConsistent(hierarchy, graph);
@@ -130,7 +125,6 @@ TYPED_TEST(AlgorithmsTest, NormalizedCutGivesKConsistentClusters) {
         SCOPED_TRACE("k = " + std::to_string(k));
         auto graph = makeGraph<TypeParam>(100, plantedClusters(10, 10, 15, 51));
 
-        random_source.seed(11);
         auto hierarchy = buildExpanderHierarchy(graph);
         const NodeIx top = hierarchy.height() - 1;
         ASSERT_EQ(hierarchy.lvl(top).graph.numNodes, 1u) << "the test needs a hierarchy that ends in a single node";
@@ -158,7 +152,6 @@ TEST(NormalizedCutTest, ThrowsIfThereIsNothingLeftToSplit) {
     constexpr NodeIx n = 200;
     auto graph = makeGraph<Unweighted32>(n, randomEdges(n, 800, 1, 51, true));
 
-    random_source.seed(11);
     auto hierarchy = buildExpanderHierarchy(graph);
     ASSERT_EQ(hierarchy.lvl(0).graph.numNodes, 1u) << "the test needs a graph that the decomposition keeps as one cluster";
 
