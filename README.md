@@ -13,8 +13,8 @@ with millions of edges in seconds.
 
 **Random walks instead of flows.** Expander decomposition algorithms usually find sparse cuts with repeated maximum-flow
 computations, which dominate their running time on large graphs. Deco finds them with random walks: it needs no flow
-computations at all. Random walks are simple, local and highly parallel. This makes Deco fast even on a single CPU core,
-maps naturally onto GPUs, and lets Deco scale to much larger graphs than earlier,
+computations at all. Random walks are simple, local and highly parallel: they make Deco fast even on a single CPU core,
+map naturally onto GPUs, and let Deco scale to much larger graphs than earlier,
 [flow-based implementations](https://doi.org/10.4230/LIPIcs.ESA.2024.61).
 
 Deco implements the algorithm of
@@ -29,9 +29,10 @@ Deco implements the algorithm of
 
 ```bash
 git clone https://github.com/RobinMnk/deco.git && cd deco
-cmake -S . -B build -DCMAKE_BUILD_TYPE=Release        # builds the CUDA backend if a CUDA toolkit is found
+# builds the CUDA backend if a CUDA toolkit is found
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DDECO_BUILD_TESTS=OFF
 cmake --build build --config Release
-./build/Deco decompose tests/data/two_cliques.mtx     # Visual Studio: build\Release\Deco.exe
+./build/Deco decompose tests/data/two_cliques.mtx
 ```
 
 The example graph consists of two cliques joined by a single edge, and Deco separates them:
@@ -63,7 +64,7 @@ Each step builds on the previous one, and each result is useful on its own.
 ### Expander decomposition
 
 An expander decomposition partitions the nodes of a graph into clusters that are well connected inside (expanders),
-while only few edges run between clusters. Here, a cluster is well connected if it has no cut sparser than a threshold
+while only a few edges run between clusters. Here, a cluster is well connected if it has no cut sparser than a threshold
 &phi;, where the sparsity of a cut is its weight divided by the smaller volume of its two sides.
 
 ```bash
@@ -72,8 +73,8 @@ Deco decompose graph.mtx --sparsity 0.3
 
 ### Congestion approximator
 
-A hierarchical congestion approximator is also known as a *tree cut sparsifier* or an *expander hierarchy*: these are
-different names for the same structure. Deco contracts every cluster of an expander decomposition into a single node and
+A hierarchical congestion approximator is also known as a *tree cut sparsifier*. Deco computes it with an efficient
+implementation of an *expander hierarchy*: it contracts every cluster of an expander decomposition into a single node and
 decomposes the contracted graph again, until one node is left. The clusters of all levels form a tree whose cuts
 approximate the cuts of the graph: for any set of demands, the tree predicts the congestion needed to route them in the
 graph.
@@ -121,8 +122,7 @@ Deco decompose  <graph.mtx> [options]
 Deco sparsifier <graph.mtx> [options]
 Deco ncut       <graph.mtx> -k N [options]
 
---backend auto|cpu|cuda   --sparsity X   --walk-threshold X   --seed N
--o FILE   --json   -h
+--backend auto|cpu|cuda   --sparsity X   --walk-threshold X   --seed N   -o FILE   --json   -h
 ```
 
 The three commands compute the expander decomposition, the congestion approximator and the normalized cut described
@@ -189,23 +189,22 @@ int main() {
 
 Weighted graphs work the same way: `load_mtx_dynamic` returns unweighted, integer-weighted or real-weighted graphs.
 
-| `Config` field | Default | Description |
+| `Config` field | Description | Default |
 | --- | --- | --- |
-| `targetSparsity` | 0.3 | cut a cluster if it has a sweep cut sparser than this |
-| `randomWalkThreshold` | 1e-4 | a cluster is done once its walk values differ by less than this |
-| `seed` | 11 | seed for the initial random-walk values |
-| `initialNumSteps`, `mainNumSteps` | 1 | CPU only: walk steps before the first sweep cut, and between later ones |
+| `targetSparsity` | cut a cluster if it has a sweep cut sparser than this | 0.3 |
+| `randomWalkThreshold` | a cluster is done once its walk values differ by less than this | 1e-4 |
+| `seed` | seed for the initial random-walk values | 11 |
 
-The CUDA backend takes unweighted graphs and integer weights up to 2<sup>32</sup> &minus; 1, as long as twice the total
-weight fits into 32 bits. With `Backend::Auto`, Deco falls back to the CPU otherwise; asking for `Backend::Cuda`
-explicitly reports why it cannot be used.
+The CUDA backend handles unweighted and integer-weighted graphs. With `Backend::Auto`, Deco uses the CPU for other graphs
+or when no GPU is available; asking for `Backend::Cuda` explicitly reports why it cannot be used.
 
 
 ## Input
 
 Deco reads graphs in the [Matrix Market](https://math.nist.gov/MatrixMarket/formats.html) format (`.mtx`), unweighted or
 with integer or real edge weights, as used by the [SuiteSparse Matrix Collection](https://sparse.tamu.edu/). Directed
-graphs are read as undirected: every directed edge becomes an undirected edge.
+graphs are read as undirected: every directed edge becomes an undirected edge. Support for edge weights comes with no
+performance overhead for unweighted graphs on the CPU.
 
 
 ## Building and testing
@@ -223,7 +222,7 @@ Requirements:
 The CUDA code is compiled for compute capabilities 8.0 and 8.6 (`CUDA_ARCHITECTURES` in
 `lib/algorithms/expander_decomposition/cuda/internal/CMakeLists.txt`); adjust this for other GPUs.
 
-Run the tests with:
+The tests are built unless `DECO_BUILD_TESTS` is `OFF`, as in the quick start. Run them with:
 
 ```bash
 cd build && ctest -C Release
