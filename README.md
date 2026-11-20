@@ -3,7 +3,7 @@
 [![Tests](https://github.com/RobinMnk/deco/actions/workflows/tests.yml/badge.svg)](https://github.com/RobinMnk/deco/actions/workflows/tests.yml)
 [![Paper](https://img.shields.io/badge/DOI-10.1145%2F3816782.3819180-blue)](https://doi.org/10.1145/3816782.3819180)
 
-Deco is a high-performance C++ library for computing graph decompositions based on **algorithms with provable guarantees**.
+Deco is a high-performance C++ library for computing graph decompositions based on algorithms with provable guarantees.
 It provides scalable implementations for computing
 - **Expander Decompositions** and
 - **Hierarchical Congestion Approximators** (also known as Tree Cut Sparsifiers)
@@ -45,7 +45,7 @@ edges: 21
 weights: unweighted
 backend: cpu
 iterations: 6
-time: 0
+time: 0.021
 numClusters: 2
 cutEdges: 1
 cutWeight: 1

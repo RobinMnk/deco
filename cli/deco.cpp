@@ -213,8 +213,9 @@ public:
     }
 };
 
-long long milliseconds(double seconds) {
-    return std::llround(seconds * 1000);
+// Milliseconds, to the microsecond
+double milliseconds(double seconds) {
+    return std::round(seconds * 1e6) / 1000;
 }
 
 // Writes one line per node, given by writeLine(out, node)
