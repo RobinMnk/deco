@@ -38,7 +38,7 @@ std::string usage() {
            "\n"
            "Commands:\n"
            "  decompose            expander decomposition\n"
-           "  hierarchy            expander hierarchy (tree cut sparsifier)\n"
+           "  sparsifier           congestion approximator (tree cut sparsifier)\n"
            "  ncut                 partition into k clusters with a small normalized cut (needs -k)\n"
            "\n"
            "Options:\n"
@@ -48,7 +48,7 @@ std::string usage() {
            "  --seed N             seed for the random walks (default: " + number(defaults.seed) + ")\n"
            "  -k N                 number of clusters for ncut\n"
            "  -o, --output FILE    write the cluster of every node to FILE, one line per node\n"
-           "                       (hierarchy: its clusters on all levels, separated by spaces)\n"
+           "                       (sparsifier: its clusters on all levels, separated by spaces)\n"
            "  --json               print the summary as one JSON object\n"
            "  -h, --help           show this help\n"
            "\n"
@@ -114,7 +114,7 @@ Args parseArgs(int argc, char* argv[]) {
     args.command = positional[0];
     args.graph = positional[1];
 
-    if (args.command != "decompose" && args.command != "hierarchy" && args.command != "ncut") {
+    if (args.command != "decompose" && args.command != "sparsifier" && args.command != "ncut") {
         throw UsageError("unknown command '" + args.command + "'");
     }
     if ((args.command == "ncut") != (args.k > 0)) {
@@ -219,20 +219,19 @@ long long milliseconds(double seconds) {
 
 // Writes one line per node, given by writeLine(out, node)
 template<class WriteLine>
-void writeNodeFile(const std::string& path, size_t numNodes, WriteLine writeLine) {
-    std::ofstream out(path);
-    if (!out) throw std::runtime_error("cannot open " + path + " for writing");
+void writeNodeLines(std::ostream& out, size_t numNodes, WriteLine writeLine) {
     for (NodeIx v = 0; v < numNodes; ++v) {
         writeLine(out, v);
         out << "\n";
     }
-    if (!out) throw std::runtime_error("cannot write " + path);
+    out.flush();
+    if (!out) throw std::runtime_error("cannot write the output file");
 }
 
 template<class EdgeWeight>
-void writeClusters(const std::string& path, const deco::Clustering<EdgeWeight>& clustering) {
-    writeNodeFile(path, clustering.clusterOf.size(), [&](std::ostream& out, NodeIx v) {
-        out << clustering.clusterOf[v];
+void writeClusters(std::ostream& out, const deco::Clustering<EdgeWeight>& clustering) {
+    writeNodeLines(out, clustering.clusterOf.size(), [&](std::ostream& line, NodeIx v) {
+        line << clustering.clusterOf[v];
     });
 }
 
@@ -263,8 +262,10 @@ const char* weightKind() {
 // Commands
 // ---------------------------------------------------------------------------------------------------------------------
 
+// Each command runs on `graph`, adds its results to `summary`, and writes the clusters to `output` (if not null)
+
 template<MutableGraph GraphT>
-void decompose(const Args& args, GraphT& graph, Summary& summary) {
+void decompose(const Args& args, GraphT& graph, Summary& summary, std::ostream* output) {
     const auto result = deco::expanderDecomposition(graph, args.options);
 
     summary.add("backend", backendName(result.backend));
@@ -272,11 +273,11 @@ void decompose(const Args& args, GraphT& graph, Summary& summary) {
     summary.add("time", milliseconds(result.stats.seconds));
     addClustering(summary, result);
 
-    if (!args.output.empty()) writeClusters(args.output, result);
+    if (output) writeClusters(*output, result);
 }
 
 template<MutableGraph GraphT>
-void hierarchy(const Args& args, GraphT& graph, Summary& summary) {
+void sparsifier(const Args& args, GraphT& graph, Summary& summary, std::ostream* output) {
     summary.add("backend", backendName(deco::chooseBackend(graph, args.options.backend)));
 
     Timer timer;
@@ -300,12 +301,12 @@ void hierarchy(const Args& args, GraphT& graph, Summary& summary) {
     }
     summary.addList("level", std::move(levels));
 
-    if (!args.output.empty()) {
-        writeNodeFile(args.output, graph.numNodes, [&](std::ostream& out, NodeIx v) {
+    if (output) {
+        writeNodeLines(*output, graph.numNodes, [&](std::ostream& line, NodeIx v) {
             NodeIx node = v;
             for (NodeIx l = 0; l < result.height(); ++l) {
                 node = result.lvl(l).parents[node];
-                out << (l > 0 ? " " : "") << node;
+                line << (l > 0 ? " " : "") << node;
             }
         });
     }
@@ -331,7 +332,7 @@ double normalizedCutValue(const GraphT& graph, const deco::Clustering<EdgeWeight
 }
 
 template<MutableGraph GraphT>
-void ncut(const Args& args, GraphT& graph, Summary& summary) {
+void ncut(const Args& args, GraphT& graph, Summary& summary, std::ostream* output) {
     summary.add("backend", backendName(deco::chooseBackend(graph, args.options.backend)));
     summary.add("k", args.k);
 
@@ -342,11 +343,18 @@ void ncut(const Args& args, GraphT& graph, Summary& summary) {
     addClustering(summary, result);
     summary.add("normalizedCut", normalizedCutValue(graph, result));
 
-    if (!args.output.empty()) writeClusters(args.output, result);
+    if (output) writeClusters(*output, result);
 }
 
 template<MutableGraph GraphT>
 void run(const Args& args, GraphT& graph) {
+    std::ofstream outputFile;   // opened before the computation, so that a wrong path fails right away
+    if (!args.output.empty()) {
+        outputFile.open(args.output);
+        if (!outputFile) throw std::runtime_error("cannot open " + args.output + " for writing");
+    }
+    std::ostream* output = args.output.empty() ? nullptr : &outputFile;
+
     Summary summary;
     summary.add("command", args.command);
     summary.add("graph", args.graph);
@@ -354,9 +362,9 @@ void run(const Args& args, GraphT& graph) {
     summary.add("edges", graph.numEdges);
     summary.add("weights", weightKind<GraphT>());
 
-    if (args.command == "decompose") decompose(args, graph, summary);
-    else if (args.command == "hierarchy") hierarchy(args, graph, summary);
-    else ncut(args, graph, summary);
+    if (args.command == "decompose") decompose(args, graph, summary, output);
+    else if (args.command == "sparsifier") sparsifier(args, graph, summary, output);
+    else ncut(args, graph, summary, output);
 
     if (args.json) {
         summary.printJson(std::cout);

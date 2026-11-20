@@ -34,10 +34,9 @@ public:
         frac_t avg = 0.0;
 
         for (size_t i = 0; i < m_distribution.size(); i++) {
-            // generate a normal distributed number
-            auto deg = gr.weightedDegree(i);
-            std::normal_distribution<>::param_type stdev(0.0, std::sqrt(static_cast<frac_t>(deg)));
-            frac_t x = normal_distribution(rng, stdev);
+            // normal distribution with standard deviation sqrt(degree), drawn as a standard normal value and scaled:
+            const auto deg = gr.weightedDegree(i);
+            const frac_t x = std::sqrt(static_cast<frac_t>(deg)) * normal_distribution(rng);
             m_distribution[i] = x;
 
             avg += (x - avg) / (static_cast<frac_t >(i) + 1.0);

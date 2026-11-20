@@ -6,7 +6,7 @@
 Deco is a high-performance C++ library for computing graph decompositions based on **algorithms with provable guarantees**.
 It provides scalable implementations for computing
 - **Expander Decompositions** and
-- **Tree Cut Sparsifiers** (i.e., Hierarchical Congestion Approximators)
+- **Hierarchical Congestion Approximators** (also known as Tree Cut Sparsifiers)
 
 Both run on the CPU (C++20) and on NVIDIA GPUs (CUDA), behind one interface, and either implementation handles graphs
 with millions of edges in seconds.
@@ -29,7 +29,7 @@ Deco implements the algorithm of
 
 ```bash
 git clone https://github.com/RobinMnk/deco.git && cd deco
-cmake -S . -B build -DCMAKE_BUILD_TYPE=Release        # add -DDECO_ENABLE_CUDA=OFF without a CUDA toolkit
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release        # builds the CUDA backend if a CUDA toolkit is found
 cmake --build build --config Release
 ./build/Deco decompose tests/data/two_cliques.mtx     # Visual Studio: build\Release\Deco.exe
 ```
@@ -55,7 +55,7 @@ cutWeight: 1
 
 ```mermaid
 flowchart LR
-    G[Graph] --> E[Expander decomposition] --> T[Tree cut sparsifier] --> N[Normalized cut]
+    G[Graph] --> E[Expander decomposition] --> C[Congestion approximator] --> N[Normalized cut]
 ```
 
 Each step builds on the previous one, and each result is useful on its own.
@@ -70,20 +70,21 @@ while only few edges run between clusters. Here, a cluster is well connected if 
 Deco decompose graph.mtx --sparsity 0.3
 ```
 
-### Tree cut sparsifier
+### Congestion approximator
 
-Also known as an *expander hierarchy* or a *hierarchical congestion approximator*. Deco contracts every cluster of an
-expander decomposition into a single node and decomposes the contracted graph again, until one node is left. The
-clusters of all levels form a tree whose cuts approximate the cuts of the graph: for any set of demands, the tree
-predicts the congestion needed to route them in the graph.
+A hierarchical congestion approximator is also known as a *tree cut sparsifier* or an *expander hierarchy*: these are
+different names for the same structure. Deco contracts every cluster of an expander decomposition into a single node and
+decomposes the contracted graph again, until one node is left. The clusters of all levels form a tree whose cuts
+approximate the cuts of the graph: for any set of demands, the tree predicts the congestion needed to route them in the
+graph.
 
 ```bash
-Deco hierarchy graph.mtx
+Deco sparsifier graph.mtx
 ```
 
 ### Normalized cut
 
-One application of the tree cut sparsifier is partitioning a graph into k clusters with a small normalized cut, the sum
+One application of the congestion approximator is partitioning a graph into k clusters with a small normalized cut, the sum
 over all clusters of the weight leaving the cluster divided by its volume. See
 [Expander Hierarchies for Normalized Cuts on Graphs](https://arxiv.org/abs/2406.14111) (KDD '24).
 
@@ -116,13 +117,16 @@ details and the analysis.
 ## Command-line tool
 
 ```text
-Deco <command> <graph.mtx> [options]
+Deco decompose  <graph.mtx> [options]
+Deco sparsifier <graph.mtx> [options]
+Deco ncut       <graph.mtx> -k N [options]
 
-Commands:
-  decompose            expander decomposition
-  hierarchy            expander hierarchy (tree cut sparsifier)
-  ncut                 partition into k clusters with a small normalized cut (needs -k)
+--backend auto|cpu|cuda   --sparsity X   --walk-threshold X   --seed N
+-o FILE   --json   -h
 ```
+
+The three commands compute the expander decomposition, the congestion approximator and the normalized cut described
+[above](#what-deco-computes).
 
 | Option | Description |
 | --- | --- |
@@ -131,8 +135,9 @@ Commands:
 | `--walk-threshold X` | a cluster is done once its walk values differ by less than X (default: 0.0001) |
 | `--seed N` | seed for the random walks (default: 11) |
 | `-k N` | number of clusters for `ncut` |
-| `-o FILE` | write the cluster of every node to FILE, one line per node (`hierarchy`: its clusters on all levels) |
+| `-o FILE` | write the cluster of every node to FILE, one line per node (`sparsifier`: its clusters on all levels) |
 | `--json` | print the summary as one JSON object |
+| `-h`, `--help` | show the help |
 
 The summary goes to stdout, times are in milliseconds, and errors go to stderr.
 
@@ -142,9 +147,7 @@ The summary goes to stdout, times are in milliseconds, and errors go to stderr.
 Add Deco to your CMake project and link `DecoLib`, plus `DecoExpanderDecompositionCuda` for the CUDA backend:
 
 ```cmake
-set(DECO_BUILD_CLI OFF)
-set(DECO_BUILD_TESTS OFF)
-add_subdirectory(deco)
+add_subdirectory(deco)   # builds only the library; the CUDA backend if a CUDA toolkit is found
 
 target_link_libraries(my_app PRIVATE DecoLib)
 if(DECO_ENABLE_CUDA)
@@ -171,7 +174,7 @@ int main() {
     const auto decomposition = deco::expanderDecomposition(graph, options);
     std::cout << decomposition.numClusters << " clusters, " << decomposition.cutEdges << " cut edges\n";
 
-    // Tree cut sparsifier: predicts the congestion of routing a demand (one value per node, summing to 0)
+    // Congestion approximator: predicts the congestion of routing a demand (one value per node, summing to 0)
     auto tree = deco::expanderHierarchy(graph, options);
     std::vector<double> demand(graph.numNodes, 0.0);
     demand[0] = 1;
@@ -211,11 +214,11 @@ Requirements:
 - CMake 3.18 or newer and a C++20 compiler (tested with GCC 11 and 13, and MSVC 2022)
 - for the CUDA backend: the CUDA Toolkit (tested with 12.9) and an NVIDIA GPU
 
-| CMake option | Default | Description |
+| CMake option | Description | Default |
 | --- | --- | --- |
-| `DECO_ENABLE_CUDA` | `ON` | build the CUDA backend |
-| `DECO_BUILD_CLI` | `ON` | build the command-line tool `Deco` |
-| `DECO_BUILD_TESTS` | `ON` | build the tests (fetches GoogleTest) |
+| `DECO_ENABLE_CUDA` | build the CUDA backend | `ON` if a CUDA compiler is found |
+| `DECO_BUILD_CLI` | build the command-line tool `Deco` | `ON` if Deco is the top-level project |
+| `DECO_BUILD_TESTS` | build the tests (fetches GoogleTest) | `ON` if Deco is the top-level project |
 
 The CUDA code is compiled for compute capabilities 8.0 and 8.6 (`CUDA_ARCHITECTURES` in
 `lib/algorithms/expander_decomposition/cuda/internal/CMakeLists.txt`); adjust this for other GPUs.
@@ -226,21 +229,7 @@ Run the tests with:
 cd build && ctest -C Release
 ```
 
-Without a GPU, the interface tests skip their CUDA cases, but `CudaTest` fails; exclude it with `ctest -C Release -E Cuda`.
-
-
-## Repository layout
-
-```text
-lib/deco.h                               public interface
-lib/core/                                graphs and partitions
-lib/algorithms/expander_decomposition/   expander decomposition: CPU, and CUDA in cuda/
-lib/algorithms/tree_cut_sparsifier/      expander hierarchy (tree cut sparsifier)
-lib/algorithms/applications/             normalized cut
-lib/utils/                               Matrix Market reader, timer
-cli/                                     command-line tool
-tests/                                   unit tests and command-line smoke tests
-```
+Tests that need a GPU are skipped when there is none.
 
 
 ## Citation

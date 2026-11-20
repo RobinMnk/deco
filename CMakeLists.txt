@@ -3,9 +3,27 @@ project(Deco LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 
-option(DECO_ENABLE_CUDA "Build CUDA expander decomposition" ON)
-option(DECO_BUILD_CLI "Build command-line executable" ON)
-option(DECO_BUILD_TESTS "Build tests" ON)
+# The CUDA backend is built if a working CUDA compiler is found
+include(CheckLanguage)
+check_language(CUDA)
+if(CMAKE_CUDA_COMPILER)
+    set(DECO_CUDA_DEFAULT ON)
+else()
+    set(DECO_CUDA_DEFAULT OFF)
+endif()
+
+# The command-line tool and the tests are built if Deco is the top-level project, not when another project includes it
+# (PROJECT_IS_TOP_LEVEL needs CMake 3.21)
+if(CMAKE_SOURCE_DIR STREQUAL PROJECT_SOURCE_DIR)
+    set(DECO_TOP_LEVEL ON)
+else()
+    set(DECO_TOP_LEVEL OFF)
+endif()
+
+option(DECO_ENABLE_CUDA "Build the CUDA backend" ${DECO_CUDA_DEFAULT})
+option(DECO_BUILD_CLI "Build the command-line tool" ${DECO_TOP_LEVEL})
+option(DECO_BUILD_TESTS "Build the tests" ${DECO_TOP_LEVEL})
+message(STATUS "Deco: CUDA backend ${DECO_ENABLE_CUDA}, command-line tool ${DECO_BUILD_CLI}, tests ${DECO_BUILD_TESTS}")
 
 add_subdirectory(lib)
 

@@ -21,8 +21,18 @@
 
 using namespace testutil;
 
+// Every test here needs a CUDA device, and is skipped without one
+class CudaDeviceTest : public ::testing::Test {
+protected:
+    void SetUp() override {
+        if (numCudaDevices() == 0) GTEST_SKIP() << "no CUDA device";
+    }
+};
+
 template<class GraphT>
-class CudaTest : public ::testing::Test {};
+class CudaTest : public CudaDeviceTest {};
+
+class CudaWeightsTest : public CudaDeviceTest {};
 
 using CudaGraphTypes = ::testing::Types<Unweighted32, Weighted32>;
 TYPED_TEST_SUITE(CudaTest, CudaGraphTypes);
@@ -395,7 +405,7 @@ TYPED_TEST(CudaTest, DecompositionLeavesNoSparseCut) {
 // Weights
 // ---------------------------------------------------------------------------------------------------------------------
 
-TEST(CudaWeightsTest, AllOnesWeightsBehaveExactlyLikeUnweighted) {
+TEST_F(CudaWeightsTest, AllOnesWeightsBehaveExactlyLikeUnweighted) {
     auto edges = plantedClusters(5, 10, 8, 5);
     for (auto& e : edges) e.w = 1;
     const auto unweighted = makeGraph<Unweighted32>(50, edges);
@@ -418,7 +428,7 @@ TEST(CudaWeightsTest, AllOnesWeightsBehaveExactlyLikeUnweighted) {
     EXPECT_EQ(decomposeOnGpu(unweighted), decomposeOnGpu(weighted));
 }
 
-TEST(CudaWeightsTest, WeightedEdgesBehaveLikeParallelEdges) {
+TEST_F(CudaWeightsTest, WeightedEdgesBehaveLikeParallelEdges) {
     const auto edges = plantedClusters(4, 8, 6, 9);   // weights 1 to 6
     const auto weighted = makeGraph<Weighted32>(32, edges);
     const auto parallel = makeGraph<Unweighted32>(32, expandToParallelEdges(edges));
@@ -462,7 +472,7 @@ TYPED_TEST(CudaTest, HierarchyWithCudaDecomposerIsConsistent) {
     expectHierarchyConsistent(hierarchy, graph);
 }
 
-TEST(CudaWeightsTest, ContractedHierarchyLevelsDecomposeConsistently) {
+TEST_F(CudaWeightsTest, ContractedHierarchyLevelsDecomposeConsistently) {
     constexpr NodeIx n = 300;
     auto graph = makeGraph<Unweighted32>(n, randomEdges(n, 1200, 1, 7, true));
 

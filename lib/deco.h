@@ -1,5 +1,5 @@
 //
-// Public interface of Deco: expander decomposition, expander hierarchy and normalized cut, on the CPU or with CUDA.
+// Public interface of Deco: expander decomposition, congestion approximator and normalized cut, on the CPU or with CUDA.
 //
 // All functions take the graph by reference and may reorder its adjacency lists (the graph itself does not change).
 // The CUDA backend is available to programs that link DecoExpanderDecompositionCuda (built with DECO_ENABLE_CUDA=ON),
@@ -164,7 +164,8 @@ Decomposition<typename GraphT::EdgeWeight> expanderDecomposition(GraphT& graph, 
     return result;
 }
 
-// Expander hierarchy (tree cut sparsifier): repeated expander decompositions of the contracted graph
+// Congestion approximator (also: expander hierarchy, tree cut sparsifier): repeated expander decompositions of the
+// contracted graph
 template<MutableGraph GraphT>
 ExpanderHierarchy<typename GraphT::EdgeWeight> expanderHierarchy(GraphT& graph, const Options& options = {}) {
     if (chooseBackend(graph, options.backend) == Backend::Cpu) {
@@ -177,7 +178,7 @@ ExpanderHierarchy<typename GraphT::EdgeWeight> expanderHierarchy(GraphT& graph, 
     );
 }
 
-// Partition into k clusters with a small normalized cut, derived from the expander hierarchy of `graph`
+// Partition into k clusters with a small normalized cut, derived from the congestion approximator of `graph`
 template<MutableGraph GraphT>
 Clustering<typename GraphT::EdgeWeight> normalizedCut(GraphT& graph, NodeIx k, const Options& options = {}) {
     auto hierarchy = expanderHierarchy(graph, options);

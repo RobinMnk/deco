@@ -54,7 +54,7 @@ jobs:
         run: ctest --test-dir build --output-on-failure
 
   # Builds everything with CUDA enabled (CUDA code, CLI and CudaTest). GitHub-hosted runners have no GPU,
-  # so this checks that the CUDA code compiles and links, and runs only the CPU tests.
+  # so this checks that the CUDA code compiles and links, and runs the tests: the ones that need a GPU skip themselves.
   # Only the needed CUDA components are installed (compiler, runtime, Thrust/CUB): the full CUDA container image
   # does not fit on the runner's disk.
   cuda-build:
@@ -80,8 +80,8 @@ jobs:
       - name: Build
         run: cmake --build build --parallel
 
-      - name: Test (without GPU tests)
-        run: ctest --test-dir build --output-on-failure -E '^Cuda'
+      - name: Test (the GPU tests are skipped)
+        run: ctest --test-dir build --output-on-failure
 
   # All tests including CudaTest, in Release (as the GPU code is used), on a machine with an NVIDIA GPU and the
   # CUDA toolkit. Needs a self-hosted runner with the labels "self-hosted", "linux" and "gpu", and only runs if the
