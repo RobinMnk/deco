@@ -5,6 +5,8 @@
 #ifndef PAREX_GRAPH_MANAGER_CU
 #define PAREX_GRAPH_MANAGER_CU
 
+#include <cuda_runtime.h>
+
 #include "devConsolidate.h"
 #include "interface.h"
 #include "devRandomWalk.h"
@@ -436,5 +438,14 @@ void CudaDeviceManager::updateLabels(std::vector<NodeIx>& nodeLabels, NodeIx act
 //    impl->applyGraphUpdates(edgeDeletions, updates);
 //}
 
+
+int numCudaDevices() {
+    int count = 0;
+    if (cudaGetDeviceCount(&count) != cudaSuccess) {
+        cudaGetLastError();   // clear the error, so that later CUDA calls do not report it
+        return 0;
+    }
+    return count;
+}
 
 #endif //PAREX_GRAPH_MANAGER_CU

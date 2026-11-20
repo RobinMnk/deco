@@ -45,6 +45,5 @@ if(DECO_BUILD_CLI)
 
     if(DECO_ENABLE_CUDA)
         target_link_libraries(Deco PRIVATE DecoExpanderDecompositionCuda)
-        target_compile_definitions(Deco PRIVATE DECO_ENABLE_CUDA)
     endif()
 endif()

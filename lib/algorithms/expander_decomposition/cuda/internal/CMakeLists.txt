@@ -4,6 +4,8 @@ add_library(DecoExpanderDecompositionCuda STATIC)
 target_sources(DecoExpanderDecompositionCuda PRIVATE ${ALL_CUDA_FILES})
 set_target_properties(DecoExpanderDecompositionCuda PROPERTIES CUDA_ARCHITECTURES "80;86")
 target_link_libraries(DecoExpanderDecompositionCuda PUBLIC DecoLib CUDA::cudart)
+# programs that link the CUDA library get the CUDA backend in deco.h
+target_compile_definitions(DecoExpanderDecompositionCuda PUBLIC DECO_ENABLE_CUDA)
 target_include_directories(DecoExpanderDecompositionCuda
         PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}

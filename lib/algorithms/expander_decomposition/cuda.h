@@ -23,13 +23,8 @@ Partition<GraphT> cudaExpanderDecomposition(GraphT& graph, const Config& config 
         stats->iterations = cuda.getNumIterations();
     }
 
-    FinalPartition finalPartition = cuda.getFinalPartition();
-    Partition<GraphT> partition{graph};
-    std::vector<NodeIx> modified;
-    // the GPU labels are not grouped by node order -> the cluster must be sorted by label (requiresSort = true)
-    partition.template splitByIndices<true, false>(0, finalPartition.clusterIds, finalPartition.numClusters, modified);
-
-    return partition;
+    const FinalPartition result = cuda.getFinalPartition();
+    return partitionByLabels(graph, result.clusterIds, result.numClusters);
 }
 
 #endif //RCUT_EXPANDER_DECOMPOSITION_CUDA_H

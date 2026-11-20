@@ -67,4 +67,7 @@ private:
 
 int testCuda();
 
+// Number of CUDA devices, 0 if there is none or no driver
+int numCudaDevices();
+
 #endif //PAREX_INTERFACE_H

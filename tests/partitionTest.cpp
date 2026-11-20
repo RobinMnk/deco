@@ -99,6 +99,30 @@ TYPED_TEST(PartitionTest, DisconnectedGraphIsSplitIntoComponents) {
     EXPECT_NE(label[7], label[8]);
 }
 
+TYPED_TEST(PartitionTest, PartitionByLabelsSplitsEveryComponent) {
+    // components: cliques {0..4} and {5..9}; the labels split both, and label 4 occurs in both components
+    std::vector<WeightedEdge> edges;
+    addClique(edges, 0, 5, 2);
+    addClique(edges, 5, 5, 3);
+    auto graph = makeGraph<TypeParam>(10, edges);
+    const auto snapshot = adjacencySnapshot(graph);
+
+    const std::vector<int> labels = {0, 0, 1, 1, 4, 2, 2, 3, 3, 4};
+    const auto partition = partitionByLabels(graph, labels, 5);
+
+    EXPECT_EQ(partition.numClusters(), 6u);   // label 4 gives two clusters, {4} and {9}
+    expectPartitionConsistent(partition, &snapshot);
+    expectClustersConnected(partition);
+
+    const auto label = clusterLabels(partition);
+    for (NodeIx u = 0; u < 10; ++u) {
+        for (NodeIx v = u + 1; v < 10; ++v) {
+            const bool together = labels[u] == labels[v] && (u < 5) == (v < 5);
+            EXPECT_EQ(label[u] == label[v], together) << "nodes " << u << " and " << v;
+        }
+    }
+}
+
 
 // ---------------------------------------------------------------------------------------------------------------------
 // Single operations

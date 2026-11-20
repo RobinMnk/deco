@@ -5,6 +5,7 @@
 #ifndef RCUT_PARTITION_H
 #define RCUT_PARTITION_H
 
+#include <limits>
 #include <ranges>
 
 #include "graph.h"
@@ -524,5 +525,35 @@ frac_t compute_normalized_cut(const Partition<Graph>& part) {
     return normalized_cut;
 }
 
+
+/**
+ * Partition of `graph` into the clusters given by `labels`: two nodes are in the same cluster exactly if they have the
+ * same label and are in the same connected component. Every labels[v] must be in [0, numLabels).
+ * Use this rather than splitting cluster 0 of Partition{graph}, which is only the first component if the graph is
+ * disconnected. Like every Partition, this may reorder the adjacency lists of `graph`.
+ */
+template<MutableGraph Graph, typename Labels>
+Partition<Graph> partitionByLabels(Graph& graph, const Labels& labels, NodeIx numLabels) {
+    constexpr NodeIx NONE = std::numeric_limits<NodeIx>::max();
+    Partition<Graph> partition{graph};   // one cluster per connected component
+
+    std::vector<NodeIx> part(graph.numNodes);            // number of a node's label within its component
+    std::vector<NodeIx> partOfLabel(numLabels, NONE);
+    std::vector<NodeIx> modified;
+
+    const NodeIx numComponents = partition.numClusters();
+    for (NodeIx c = 0; c < numComponents; ++c) {
+        NodeIx numParts = 0;
+        for (const auto& cv : partition.getCluster(c)) {
+            NodeIx& p = partOfLabel[labels[cv.nix]];
+            if (p == NONE) p = numParts++;
+            part[cv.nix] = p;
+        }
+        for (const auto& cv : partition.getCluster(c)) partOfLabel[labels[cv.nix]] = NONE;
+
+        if (numParts > 1) partition.template splitByIndices<true, false>(c, part, numParts, modified);
+    }
+    return partition;
+}
 
 #endif //RCUT_PARTITION_H

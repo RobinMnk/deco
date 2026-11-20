@@ -35,9 +35,10 @@ endfunction()
 configure_test_target(graphTest graphTest.cpp)
 configure_test_target(partitionTest partitionTest.cpp)
 configure_test_target(algorithmsTest algorithmsTest.cpp)
+configure_test_target(decoTest decoTest.cpp)
 
 if(DECO_ENABLE_CUDA)
     configure_test_target(CudaTest cudaTest.cpp)
     target_link_libraries(CudaTest PRIVATE DecoExpanderDecompositionCuda)
-    target_compile_definitions(CudaTest PRIVATE DECO_ENABLE_CUDA)
+    target_link_libraries(decoTest PRIVATE DecoExpanderDecompositionCuda)   # its CUDA cases run if a device is present
 endif()
