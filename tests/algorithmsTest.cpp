@@ -39,6 +39,41 @@ TYPED_TEST(AlgorithmsTest, CpuDecompositionGivesConsistentConnectedClusters) {
     }
 }
 
+// Quality, not just consistency. The decomposition only cuts below its sparsity threshold, and keeps cutting while it
+// finds such a cut. So it must keep an expander whole, and must not leave a sparse cut inside a cluster. (Whether it
+// cuts more than needed depends on the walk and the threshold, and is not checked.)
+
+TYPED_TEST(AlgorithmsTest, CpuDecompositionKeepsExpandersWhole) {
+    const Config config;
+    ASSERT_LT(config.targetSparsity, 1.0 / 3) << "the cliques have no cut below 1/3, the test needs a lower threshold";
+    for (const NodeIx size : {5u, 12u, 40u}) {
+        SCOPED_TRACE("clique of " + std::to_string(size));
+        auto graph = makeGraph<TypeParam>(size, expanderClique(size));
+
+        random_source.seed(11);
+        const auto result = expander_decomposition::compute(graph);
+        EXPECT_EQ(result.numClusters(), 1u);
+    }
+}
+
+TYPED_TEST(AlgorithmsTest, CpuDecompositionLeavesNoSparseCut) {
+    const Config config;
+    const double threshold = config.targetSparsity;
+    for (const PlantedInstance& instance : plantedInstances) {
+        for (unsigned seed = 0; seed < 5; ++seed) {
+            SCOPED_TRACE(describe(instance, seed));
+            auto graph = makeGraph<TypeParam>(instance.clusters * instance.size,
+                                              plantedClusters(instance.clusters, instance.size, instance.bridges, seed));
+
+            random_source.seed(11 + seed);
+            const auto result = expander_decomposition::compute(graph);
+
+            expectNoSparsePlantedCutLeft(result, instance.size, threshold);
+            if (::testing::Test::HasFailure()) return;
+        }
+    }
+}
+
 TEST(CpuDecompositionTest, AllOnesWeightsGiveTheSamePartitionAsUnweighted) {
     auto edges = plantedClusters(5, 10, 8, 5);
     for (auto& e : edges) e.w = 1;

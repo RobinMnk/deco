@@ -205,6 +205,52 @@ std::vector<int> decomposeOnGpu(const GraphT& graph) {
     return result.clusterIds;
 }
 
+/**
+ * Runs the decomposition loop of CudaDeviceManager::expanderDecomposition step by step and checks every phase
+ * against the host: walk step, sweep cuts, state after cutting, and the labels of deactivated clusters.
+ */
+template<class GraphT>
+void expectEveryPhaseMatchesHost(const GraphT& graph) {
+    CudaDeviceManager cuda;
+    cuda.initialize(graph);
+
+    // same loop as CudaDeviceManager::expanderDecomposition, with checks between the phases
+    std::vector<int> previous = cuda.downloadLabels();
+    NodeIx comparedSweepCuts = 0;
+    int iteration = 0;
+    constexpr int maxIterations = 2000;
+
+    for (; iteration < maxIterations && anyActive(previous); ++iteration) {
+        SCOPED_TRACE("iteration " + std::to_string(iteration));
+
+        expectWalkStepMatchesHost(cuda, graph);
+        comparedSweepCuts += expectSweepCutsMatchHost(cuda, graph);
+        cuda.cutClusters();
+        expectStateAfterCutMatchesHost(cuda, graph);
+
+        // deactivated clusters never change again, and newly deactivated clusters get labels that are not in use
+        const auto labels = cuda.downloadLabels();
+        std::set<int> inactiveBefore;
+        for (const int l : previous) {
+            if (!isActive(l)) inactiveBefore.insert(l);
+        }
+        for (NodeIx v = 0; v < graph.numNodes; ++v) {
+            if (!isActive(previous[v])) {
+                EXPECT_EQ(labels[v], previous[v]) << "label of inactive node " << v << " changed";
+            } else if (!isActive(labels[v])) {
+                EXPECT_FALSE(inactiveBefore.contains(labels[v]))
+                    << "node " << v << " was deactivated with label " << labels[v] << ", which an earlier inactive cluster already has";
+            }
+        }
+        previous = labels;
+
+        if (::testing::Test::HasFailure()) return;
+    }
+
+    EXPECT_FALSE(anyActive(previous)) << "no termination within " << maxIterations << " iterations";
+    EXPECT_GT(comparedSweepCuts, 0u) << "no sweep cut could be compared (float ties in every cluster)";
+}
+
 } // namespace
 
 
@@ -246,46 +292,20 @@ TYPED_TEST(CudaTest, UploadMatchesHostGraph) {
 // ---------------------------------------------------------------------------------------------------------------------
 
 TYPED_TEST(CudaTest, EveryPhaseMatchesHost) {
-    const auto graph = makeGraph<TypeParam>(48, plantedClusters(4, 12, 6, 1));
-
-    CudaDeviceManager cuda;
-    cuda.initialize(graph);
-
-    // same loop as CudaDeviceManager::expanderDecomposition, with checks between the phases
-    std::vector<int> previous = cuda.downloadLabels();
-    NodeIx comparedSweepCuts = 0;
-    int iteration = 0;
-    constexpr int maxIterations = 2000;
-
-    for (; iteration < maxIterations && anyActive(previous); ++iteration) {
-        SCOPED_TRACE("iteration " + std::to_string(iteration));
-
-        expectWalkStepMatchesHost(cuda, graph);
-        comparedSweepCuts += expectSweepCutsMatchHost(cuda, graph);
-        cuda.cutClusters();
-        expectStateAfterCutMatchesHost(cuda, graph);
-
-        // deactivated clusters never change again, and newly deactivated clusters get labels that are not in use
-        const auto labels = cuda.downloadLabels();
-        std::set<int> inactiveBefore;
-        for (const int l : previous) {
-            if (!isActive(l)) inactiveBefore.insert(l);
-        }
-        for (NodeIx v = 0; v < graph.numNodes; ++v) {
-            if (!isActive(previous[v])) {
-                EXPECT_EQ(labels[v], previous[v]) << "label of inactive node " << v << " changed";
-            } else if (!isActive(labels[v])) {
-                EXPECT_FALSE(inactiveBefore.contains(labels[v]))
-                    << "node " << v << " was deactivated with label " << labels[v] << ", which an earlier inactive cluster already has";
-            }
-        }
-        previous = labels;
-
-        if (::testing::Test::HasFailure()) return;
+    {
+        SCOPED_TRACE("4 cliques of 12");
+        expectEveryPhaseMatchesHost(makeGraph<TypeParam>(48, plantedClusters(4, 12, 6, 1)));
     }
+    if (::testing::Test::HasFailure()) return;
 
-    EXPECT_FALSE(anyActive(previous)) << "no termination within " << maxIterations << " iterations";
-    EXPECT_GT(comparedSweepCuts, 0u) << "no sweep cut could be compared (float ties in every cluster)";
+    // The warp kernels go through the neighbours of a node 32 at a time, so degrees above 32 take a second round.
+    // With 2000 nodes, Thrust's sort, scan and reduce also take their code paths for larger inputs.
+    SCOPED_TRACE("50 cliques of 40");
+    const auto graph = makeGraph<TypeParam>(2000, plantedClusters(50, 40, 100, 1));
+    EdgeIx maxDegree = 0;
+    for (NodeIx v = 0; v < graph.numNodes; ++v) maxDegree = std::max(maxDegree, graph.degree(v));
+    ASSERT_GT(maxDegree, 32u) << "the graph must have nodes with more neighbours than a warp has threads";
+    expectEveryPhaseMatchesHost(graph);
 }
 
 
@@ -337,6 +357,35 @@ TYPED_TEST(CudaTest, NumCutEdgesMatchesHost) {
     splitByLabels(host, result.clusterIds);
 
     EXPECT_EQ(cuda.getNumCutEdges(), host.getNumCutEdges());
+}
+
+// Quality, as in algorithmsTest: expanders stay whole, and no sparse cut is left inside a cluster.
+// The GPU uses the global threshold sc_threshold.
+
+TYPED_TEST(CudaTest, DecompositionKeepsExpandersWhole) {
+    ASSERT_LT(sc_threshold, 1.0 / 3) << "the cliques have no cut below 1/3, the test needs a lower threshold";
+    for (const NodeIx size : {5u, 12u, 40u}) {
+        SCOPED_TRACE("clique of " + std::to_string(size));
+        const auto labels = decomposeOnGpu(makeGraph<TypeParam>(size, expanderClique(size)));
+        EXPECT_EQ(std::set<int>(labels.begin(), labels.end()).size(), 1u);
+    }
+}
+
+TYPED_TEST(CudaTest, DecompositionLeavesNoSparseCut) {
+    for (const PlantedInstance& instance : plantedInstances) {
+        for (unsigned seed = 0; seed < 5; ++seed) {
+            SCOPED_TRACE(describe(instance, seed));
+            const auto graph = makeGraph<TypeParam>(instance.clusters * instance.size,
+                                                    plantedClusters(instance.clusters, instance.size, instance.bridges, seed));
+            const auto labels = decomposeOnGpu(graph);
+
+            auto copy = copyGraph(graph);
+            Partition host{copy};
+            splitByLabels(host, labels);
+            expectNoSparsePlantedCutLeft(host, instance.size, sc_threshold);
+            if (::testing::Test::HasFailure()) return;
+        }
+    }
 }
 
 

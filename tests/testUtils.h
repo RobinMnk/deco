@@ -13,6 +13,7 @@
 #include <numeric>
 #include <random>
 #include <set>
+#include <string>
 #include <utility>
 #include <vector>
 
@@ -138,6 +139,36 @@ inline std::vector<WeightedEdge> expandToParallelEdges(const std::vector<Weighte
         for (uint32_t i = 0; i < e.w; ++i) parallel.push_back({e.u, e.v, 1});
     }
     return parallel;
+}
+
+/**
+ * Instances for the quality tests: `clusters` cliques of `size` nodes, joined by a chain of single edges and
+ * `bridges` extra edges (see plantedClusters). The cuts between cliques are far below the sparsity threshold.
+ */
+struct PlantedInstance {
+    NodeIx clusters;
+    NodeIx size;
+    NodeIx bridges;
+};
+
+inline constexpr PlantedInstance plantedInstances[] = {{6, 10, 10}, {6, 20, 10}, {8, 30, 8}, {4, 40, 4}, {10, 12, 0}};
+
+inline std::string describe(const PlantedInstance& instance, unsigned seed) {
+    return std::to_string(instance.clusters) + " cliques of " + std::to_string(instance.size) + ", "
+         + std::to_string(instance.bridges) + " extra bridges, seed " + std::to_string(seed);
+}
+
+/**
+ * Clique on `size` nodes with weights 2 and 3. Every cut has sparsity above 1/3 (cut weight / smaller volume:
+ * at least 2 k (size - k) / (3 (size - 1) min(k, size - k)) > 1/3 for a side of k nodes), so a decomposition that
+ * only cuts below a threshold of at most 1/3 has to keep it as one cluster.
+ */
+inline std::vector<WeightedEdge> expanderClique(NodeIx size) {
+    std::vector<WeightedEdge> edges;
+    for (NodeIx i = 0; i < size; ++i)
+        for (NodeIx j = i + 1; j < size; ++j)
+            edges.push_back({i, j, 2 + (i + j) % 2});
+    return edges;
 }
 
 /**
@@ -350,6 +381,47 @@ void expectClustersConnected(const Partition<GraphT>& partition) {
             }
         }
         EXPECT_EQ(reached, cluster.size()) << "cluster " << c << " is not connected";
+        ++c;
+    }
+}
+
+/**
+ * No cluster still contains a sparse cut between planted cliques (nodes v of plantedClusters(..., size, ...) belong
+ * to clique v / size). In every cluster with nodes of several cliques, the nodes of each clique are separated from
+ * the rest of the cluster by a cut of sparsity at least `threshold` (cut weight / smaller volume, counting only the
+ * cluster's internal edges). The decomposition keeps cutting while it finds a cut below its threshold, so it must not
+ * stop with such a cut left inside a cluster.
+ */
+template<class GraphT>
+void expectNoSparsePlantedCutLeft(const Partition<GraphT>& partition, NodeIx size, double threshold) {
+    const GraphT& graph = partition.getGraph();
+    const std::vector<NodeIx> label = clusterLabels(partition);
+
+    NodeIx c = 0;
+    for (const auto& cluster : partition) {
+        std::map<NodeIx, std::pair<uint64_t, uint64_t>> cutAndVolume;   // per clique, over its nodes in this cluster
+        uint64_t clusterVolume = 0;
+        for (const auto& cv : cluster) {
+            auto& [cut, volume] = cutAndVolume[cv.nix / size];
+            for (EdgeIx eix = graph.startIndex(cv.nix); eix < graph.endIndex(cv.nix); ++eix) {
+                const NodeIx nb = graph.edges[eix];
+                if (label[nb] != c) continue;
+                const auto w = static_cast<uint64_t>(graph.edgeWeight(eix));
+                volume += w;
+                clusterVolume += w;
+                if (nb / size != cv.nix / size) cut += w;
+            }
+        }
+        if (cutAndVolume.size() > 1) {
+            for (const auto& [clique, cutVolume] : cutAndVolume) {
+                const auto [cut, volume] = cutVolume;
+                const uint64_t smaller = std::min(volume, clusterVolume - volume);
+                if (smaller == 0) continue;
+                const double sparsity = static_cast<double>(cut) / static_cast<double>(smaller);
+                EXPECT_GE(sparsity, threshold) << "cluster " << c << " (" << cluster.size() << " nodes) contains a cut of sparsity "
+                                               << sparsity << ": its nodes of clique " << clique << " against the rest";
+            }
+        }
         ++c;
     }
 }
