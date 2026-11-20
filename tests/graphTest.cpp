@@ -1,6 +1,13 @@
 #include <gtest/gtest.h>
 
+#include <filesystem>
+#include <fstream>
+#include <string>
+#include <variant>
+#include <vector>
+
 #include "core/graph.h"
+#include "utils/graph_io.h"
 
 TEST(GraphTest, UnweightedDynamicGraphFinalizesToCsr) {
     DynamicGraph<> graph{4, 3};
@@ -162,4 +169,79 @@ TYPED_TEST(GraphTypedTest, GraphWithoutEdges) {
     if constexpr (!std::same_as<TypeParam, Unweighted32>) {
         EXPECT_EQ(graph.weightedDegrees().size(), 5u);
     }
+}
+
+
+// ---------------------------------------------------------------------------------------------------------------------
+// Reading Matrix Market files
+// ---------------------------------------------------------------------------------------------------------------------
+
+namespace {
+
+// Writes `content` to a temporary file, loads it, and removes the file again
+AnyGraph loadMtx(const std::string& content) {
+    static int counter = 0;
+    const auto path = std::filesystem::temp_directory_path() / ("deco_graphTest_" + std::to_string(counter++) + ".mtx");
+    std::ofstream(path) << content;
+    struct Remove {
+        std::filesystem::path path;
+        ~Remove() { std::error_code ignored; std::filesystem::remove(path, ignored); }
+    } remove{path};
+    return load_mtx_dynamic(path.string());
+}
+
+template<class GraphT>
+std::vector<NodeIx> neighborsOf(const GraphT& graph, NodeIx v) {
+    return {graph.nbegin(v), graph.nend(v)};
+}
+
+} // namespace
+
+TEST(MatrixMarketTest, SymmetricFileKeepsTheOrderOfTheEntries) {
+    const AnyGraph loaded = loadMtx(
+        "%%MatrixMarket matrix coordinate pattern symmetric\n"
+        "% a comment\n"
+        "4 4 4\n"
+        "2 1\n"
+        "4 2\n"
+        "3 2\n"
+        "3 3\n");   // self loop: skipped
+    ASSERT_TRUE(std::holds_alternative<CsrGraph<>>(loaded));
+    const auto& graph = std::get<CsrGraph<>>(loaded);
+
+    EXPECT_EQ(graph.numNodes, 4u);
+    EXPECT_EQ(graph.numEdges, 3u);
+    EXPECT_EQ(neighborsOf(graph, 1), (std::vector<NodeIx>{0, 3, 2}));
+}
+
+TEST(MatrixMarketTest, GeneralFileGivesOneEdgePerEntry) {
+    // a directed graph: the links 1 -> 2 and 2 -> 1 become two parallel edges (the graph A + A^T)
+    const AnyGraph loaded = loadMtx(
+        "%%MatrixMarket matrix coordinate pattern general\n"
+        "3 3 3\n"
+        "2 1\n"
+        "1 2\n"
+        "3 2\n");
+    const auto& graph = std::get<CsrGraph<>>(loaded);
+
+    EXPECT_EQ(graph.numEdges, 3u);
+    EXPECT_EQ(neighborsOf(graph, 0), (std::vector<NodeIx>{1, 1}));
+    EXPECT_EQ(neighborsOf(graph, 1), (std::vector<NodeIx>{0, 0, 2}));
+    EXPECT_EQ(neighborsOf(graph, 2), (std::vector<NodeIx>{1}));
+}
+
+TEST(MatrixMarketTest, WeightsOfBothDirectionsAddUp) {
+    const AnyGraph loaded = loadMtx(
+        "%%MatrixMarket matrix coordinate integer general\n"
+        "3 3 3\n"
+        "1 2 5\n"
+        "2 1 6\n"
+        "2 3 7\n");
+    ASSERT_TRUE(std::holds_alternative<CsrGraph<IntWeight>>(loaded));
+    const auto& graph = std::get<CsrGraph<IntWeight>>(loaded);
+
+    EXPECT_EQ(graph.numEdges, 3u);
+    EXPECT_EQ(graph.weightedDegree(0), 11);
+    EXPECT_EQ(graph.weightedDegree(1), 18);
+    EXPECT_EQ(graph.weightedDegree(2), 7);
 }

@@ -86,6 +86,11 @@ inline MtxHeader parse_mtx_header(std::ifstream& file) {
     return header;
 }
 
+/**
+ * Every entry of the file becomes one undirected edge; self loops and zero weights are skipped. A symmetric file lists
+ * every edge once. A general file (e.g. a directed graph) can list both (u, v) and (v, u): these become two parallel
+ * edges, i.e. the graph A + A^T, where the weights of both directions add up.
+ */
 template <typename Spec = Unweighted>
 DynamicGraph<Spec> read_mtx_dynamic_impl(std::ifstream& file, const MtxHeader& header) {
     NodeIx n = std::max(header.cols, header.rows);

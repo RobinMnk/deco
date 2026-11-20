@@ -42,3 +42,20 @@ if(DECO_ENABLE_CUDA)
     target_link_libraries(CudaTest PRIVATE DecoExpanderDecompositionCuda)
     target_link_libraries(decoTest PRIVATE DecoExpanderDecompositionCuda)   # its CUDA cases run if a device is present
 endif()
+
+# Smoke tests of the command-line tool on two 5-cliques joined by one edge: every command runs and finds the two cliques
+if(DECO_BUILD_CLI)
+    set(DATA ${CMAKE_CURRENT_SOURCE_DIR}/data)
+    add_test(NAME cli.decompose COMMAND Deco decompose ${DATA}/two_cliques.mtx)
+    add_test(NAME cli.decompose.json COMMAND Deco decompose ${DATA}/two_cliques_integer.mtx --json)
+    add_test(NAME cli.hierarchy COMMAND Deco hierarchy ${DATA}/two_cliques_real.mtx)
+    add_test(NAME cli.ncut COMMAND Deco ncut ${DATA}/two_cliques.mtx -k 2)
+    set_tests_properties(cli.decompose cli.ncut PROPERTIES PASS_REGULAR_EXPRESSION "numClusters: 2")
+    set_tests_properties(cli.decompose.json PROPERTIES PASS_REGULAR_EXPRESSION "\"numClusters\":2,\"cutEdges\":1,")
+    set_tests_properties(cli.hierarchy PROPERTIES PASS_REGULAR_EXPRESSION "level 1: clusters 2, edges 1")
+
+    # wrong use ends with an error
+    add_test(NAME cli.ncut-without-k COMMAND Deco ncut ${DATA}/two_cliques.mtx)
+    add_test(NAME cli.missing-file COMMAND Deco decompose ${DATA}/missing.mtx)
+    set_tests_properties(cli.ncut-without-k cli.missing-file PROPERTIES WILL_FAIL TRUE)
+endif()
