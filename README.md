@@ -112,13 +112,17 @@ Compared with flow-based algorithms, the decomposition may cut more edges; in re
 details and the analysis.
 
 
-## Performance
+[//]: # (## Performance)
 
-<!-- TODO: numbers from the paper, and the hardware they were measured on -->
+[//]: # ()
+[//]: # (<!-- TODO: numbers from the paper, and the hardware they were measured on -->)
 
-| Graph | Nodes | Edges | CPU | GPU |
-| --- | ---: | ---: | ---: | ---: |
-| | | | | |
+[//]: # ()
+[//]: # (| Graph | Nodes | Edges | CPU | GPU |)
+
+[//]: # (| --- | ---: | ---: | ---: | ---: |)
+
+[//]: # (| | | | | |)
 
 
 ## Command-line tool
