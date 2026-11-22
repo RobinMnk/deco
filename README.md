@@ -3,12 +3,13 @@
 [![Tests](https://github.com/RobinMnk/deco/actions/workflows/tests.yml/badge.svg)](https://github.com/RobinMnk/deco/actions/workflows/tests.yml)
 [![Paper](https://img.shields.io/badge/DOI-10.1145%2F3816782.3819180-blue)](https://doi.org/10.1145/3816782.3819180)
 
-Deco is a high-performance C++ library for computing graph decompositions based on algorithms with provable guarantees.
+**Deco** is a C++ library for computing graph decompositions based on algorithms with provable guarantees.
 It provides scalable implementations for computing
 - **Expander Decompositions** and
 - **Hierarchical Congestion Approximators** (also known as Tree Cut Sparsifiers)
 
-Both run on the CPU (C++20) and on NVIDIA GPUs (CUDA), behind one interface, and either implementation handles graphs
+on undirected edge-weighted graphs.
+All algorithms can be run sequentially on the CPU (C++20) and (shared-memory) parallel on NVIDIA GPUs (CUDA), behind one interface. Either implementation handles graphs
 with millions of edges in seconds.
 
 **Random walks instead of flows.** Expander decomposition algorithms usually find sparse cuts with repeated maximum-flow
@@ -142,6 +143,41 @@ The three commands compute the expander decomposition, the congestion approximat
 The summary goes to stdout, times are in milliseconds, and errors go to stderr.
 
 
+## Python
+
+The Python package `deco-graph` (imported as `deco`) offers the same three computations. pip builds it from source, with
+the CUDA backend if a CUDA toolkit is found, and also installs the command-line tool `Deco`:
+
+```bash
+pip install .            # in a clone, or: pip install git+https://github.com/RobinMnk/deco
+pip install ".[scipy]"   # with SciPy, for Graph.from_scipy
+```
+
+```python
+import deco
+
+g = deco.Graph.from_mtx("tests/data/two_cliques.mtx")   # or deco.Graph.from_scipy(A) for a SciPy sparse matrix
+d = deco.expander_decomposition(g, sparsity=0.3)         # backend="auto" (default), "cpu" or "cuda"
+print(d.num_clusters, d.cut_edges, d.cluster_of)         # 2 1 [0 0 0 0 0 1 1 1 1 1]
+
+t = deco.sparsifier(g)                                   # congestion approximator
+print(t.predict([1, 0, 0, 0, 0, 0, 0, 0, 0, -1]))        # 1.0
+print(len(t.levels), t.levels[0].parents)                # 2 [0 0 0 0 0 1 1 1 1 1]
+
+c = deco.normalized_cut(t, k=2)                          # from the congestion approximator t
+print(c.num_clusters, c.normalized_cut)                  # 2 0.09523809523809523
+```
+
+A graph is converted once and can be used for any number of computations, and a congestion approximator for any number
+of predictions and normalized cuts; the computations release the GIL. A symmetric SciPy
+matrix gives one edge per node pair, any other matrix the graph A + A^T. The weights follow from the values (all 1:
+unweighted, whole numbers: integer weights, otherwise real weights), unless `weighted=True` or `False` is given.
+Invalid input raises `ValueError`.
+
+Requirements: Python 3.10 or newer and a C++20 compiler (pip fetches CMake if needed). Run the tests with
+`pip install ".[test]"` and `pytest`.
+
+
 ## Using Deco as a library
 
 Add Deco to your CMake project and link `DecoLib`, plus `DecoExpanderDecompositionCuda` for the CUDA backend:
@@ -181,9 +217,9 @@ int main() {
     demand[1] = -1;
     std::cout << "predicted congestion: " << tree.predict(demand) << "\n";
 
-    // Normalized cut into 8 clusters
-    const auto clustering = deco::normalizedCut(graph, 8, options);
-    std::cout << "normalized cut: " << clustering.cutEdges << " cut edges\n";
+    // Normalized cut into 8 clusters, from the congestion approximator (or deco::normalizedCut(graph, 8, options))
+    const auto clustering = deco::normalizedCut(graph, tree, 8);
+    std::cout << "normalized cut: " << clustering.normalizedCut << " (" << clustering.cutEdges << " cut edges)\n";
 }
 ```
 
@@ -218,6 +254,7 @@ Requirements:
 | `DECO_ENABLE_CUDA` | build the CUDA backend | `ON` if a CUDA compiler is found |
 | `DECO_BUILD_CLI` | build the command-line tool `Deco` | `ON` if Deco is the top-level project |
 | `DECO_BUILD_TESTS` | build the tests (fetches GoogleTest) | `ON` if Deco is the top-level project |
+| `DECO_BUILD_PYTHON` | build the Python module (`pip install` turns it on) | `OFF` |
 
 The CUDA code is compiled for compute capabilities 8.0 and 8.6 (`CUDA_ARCHITECTURES` in
 `lib/algorithms/expander_decomposition/cuda/internal/CMakeLists.txt`); adjust this for other GPUs.

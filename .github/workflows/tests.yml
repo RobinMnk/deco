@@ -53,6 +53,28 @@ jobs:
       - name: Test
         run: ctest --test-dir build --output-on-failure
 
+  # The Python package: pip builds and installs it (the module and the command-line tool), then pytest runs its tests.
+  # The runners have no CUDA toolkit, so this builds the CPU backend only.
+  python:
+    name: Python (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install
+        run: pip install ".[test]"
+
+      - name: Test
+        run: pytest
+
   # Builds everything with CUDA enabled (CUDA code, CLI and CudaTest). GitHub-hosted runners have no GPU,
   # so this checks that the CUDA code compiles and links, and runs the tests: the ones that need a GPU skip themselves.
   # Only the needed CUDA components are installed (compiler, runtime, Thrust/CUB): the full CUDA container image
