@@ -28,6 +28,7 @@ void nodeDiffKernel_Sparse_WarpParallel(
     const EdgeIx* __restrict__ clusterDegrees,
     const label_t* __restrict__ labels,
     const uint64_t* __restrict__ packedKeys,
+    const NodeIx* __restrict__ positions,   // index of every active node in `nodes`, the input order of the sort
     const double* __restrict__ dist,
     NodeData* __restrict__ nodeData
 ) {
@@ -90,7 +91,10 @@ void nodeDiffKernel_Sparse_WarpParallel(
         if (nbKey != myKey) {
             isBefore = nbKey < myKey;
         } else {
-            isBefore = nb < nix;
+            // Equal keys: the stable radix sort keeps them in input order, so the tie must be broken by the input
+            // position as well. (Breaking it by node id counted some sweep cuts too small, so that clusters were cut
+            // although the true cut was not sparse.)
+            isBefore = __ldg(&positions[nb]) < warpId;
         }
 
         const auto w = static_cast<int32_t>(edgeWeight(weights, j));
@@ -201,6 +205,7 @@ class SweepCutManager {
     thrust::device_vector<NodeData> scNodeData2;
     cub::DoubleBuffer<NodeData> scNodeData;
 
+    thrust::device_vector<NodeIx> positions;   // index of every active node in the input order of the sort
     NodeData* activeNodeData;
 
     // CUB Buffers
@@ -241,6 +246,7 @@ public:
         scNodeData2(n),
         scNodeData(thrust::raw_pointer_cast(scNodeData1.data()),
             thrust::raw_pointer_cast(scNodeData2.data())),
+        positions(n),
         sweepCuts(n),
         sweepCutsBuffer(n)
     {
@@ -306,6 +312,17 @@ inline label_t extractLabel(const uint64_t key) {
     const auto orderedLabel = static_cast<int32_t>(key >> 32);
     return orderedLabel ^ 0x80000000;
 }
+
+// positions[nix] = index of the active node nix, for the tie-break in nodeDiffKernel_Sparse_WarpParallel
+struct RecordPositionOp {
+    const LabeledNode* nodes;
+    NodeIx* positions;
+
+    __device__
+    void operator()(NodeIx i) const {
+        positions[nodes[i].nix] = i;
+    }
+};
 
 struct LabelFromKeyExtractor {
     __host__ __device__
@@ -468,6 +485,16 @@ inline void SweepCutManager::prepare_nodes(GraphManager& gm, PartitionManager& p
     // printf("\n");
     // fflush(stdout);
 
+    // the index of every active node, for the tie-break in the kernel
+    const LabeledNode* activeNodesPtr = thrust::raw_pointer_cast(pm.getActiveNodes().data());
+    NodeIx* positionsPtr = thrust::raw_pointer_cast(positions.data());
+    thrust::for_each_n(
+        thrust::device,
+        thrust::make_counting_iterator<NodeIx>(0),
+        pm.numActiveNodes,
+        RecordPositionOp{activeNodesPtr, positionsPtr}
+    );
+
     const size_t numBlocks = getGridSizeWarpParallel(pm.numActiveNodes);
 
     nodeDiffKernel_Sparse_WarpParallel<<<numBlocks, threads>>>(
@@ -480,6 +507,7 @@ inline void SweepCutManager::prepare_nodes(GraphManager& gm, PartitionManager& p
         thrust::raw_pointer_cast(pm.getAllInternalDegrees().data()),
          thrust::raw_pointer_cast(pm.getAllLabels().data()),
         packedKeys.Current(),
+        positionsPtr,
         dist,
         scNodeData.Current()
     );

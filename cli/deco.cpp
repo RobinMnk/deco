@@ -313,25 +313,6 @@ void sparsifier(const Args& args, GraphT& graph, Summary& summary, std::ostream*
     }
 }
 
-// Normalized cut value: the sum over all clusters of (weight of edges leaving the cluster) / (volume of the cluster)
-template<MutableGraph GraphT, class EdgeWeight>
-double normalizedCutValue(const GraphT& graph, const deco::Clustering<EdgeWeight>& clustering) {
-    std::vector<double> cut(clustering.numClusters, 0), volume(clustering.numClusters, 0);
-    for (NodeIx v = 0; v < graph.numNodes; ++v) {
-        const NodeIx c = clustering.clusterOf[v];
-        for (EdgeIx eix = graph.startIndex(v); eix < graph.endIndex(v); ++eix) {
-            const double w = graph.edgeWeight(eix);
-            volume[c] += w;
-            if (clustering.clusterOf[graph.edges[eix]] != c) cut[c] += w;
-        }
-    }
-    double value = 0;
-    for (NodeIx c = 0; c < clustering.numClusters; ++c) {
-        if (volume[c] > 0) value += cut[c] / volume[c];
-    }
-    return value;
-}
-
 template<MutableGraph GraphT>
 void ncut(const Args& args, GraphT& graph, Summary& summary, std::ostream* output) {
     summary.add("backend", backendName(deco::chooseBackend(graph, args.options.backend)));
@@ -342,7 +323,7 @@ void ncut(const Args& args, GraphT& graph, Summary& summary, std::ostream* outpu
     const auto result = deco::normalizedCut(graph, args.k, args.options);
     summary.add("time", milliseconds(timer.timeSeconds()));
     addClustering(summary, result);
-    summary.add("normalizedCut", normalizedCutValue(graph, result));
+    summary.add("normalizedCut", result.normalizedCut);
 
     if (output) writeClusters(*output, result);
 }
