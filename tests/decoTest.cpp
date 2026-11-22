@@ -200,5 +200,40 @@ TYPED_TEST(InterfaceHierarchyTest, NormalizedCutGivesKValidClusters) {
         const auto result = deco::normalizedCut(graph, 3, {.backend = backend});
         EXPECT_EQ(result.numClusters, 3u);
         expectValidClustering(graph, result, false);   // normalized-cut clusters need not be connected
+        EXPECT_DOUBLE_EQ(result.normalizedCut, deco::normalizedCutValue(graph, result));
+    }
+}
+
+TYPED_TEST(InterfaceHierarchyTest, NormalizedCutReusesTheHierarchy) {
+    for (const deco::Backend backend : availableBackends()) {
+        SCOPED_TRACE(name(backend));
+        auto graph = makeGraph<TypeParam>(100, plantedClusters(10, 10, 15, 51));
+        auto hierarchy = deco::expanderHierarchy(graph, {.backend = backend});
+
+        const auto first = deco::normalizedCut(graph, hierarchy, 3);
+        EXPECT_EQ(deco::normalizedCut(graph, hierarchy, 5).numClusters, 5u);
+        const auto again = deco::normalizedCut(graph, hierarchy, 3);
+        EXPECT_EQ(again.clusterOf, first.clusterOf);
+        EXPECT_EQ(again.normalizedCut, first.normalizedCut);
+        expectHierarchyConsistent(hierarchy, graph);   // unchanged: volumes and cuts still match the graph
+
+        if (backend == deco::Backend::Cpu) {   // the same as with a new hierarchy (the GPU need not be deterministic)
+            auto fresh = makeGraph<TypeParam>(100, plantedClusters(10, 10, 15, 51));
+            const auto direct = deco::normalizedCut(fresh, 3, {.backend = backend});
+            EXPECT_EQ(direct.clusterOf, first.clusterOf);
+            EXPECT_EQ(direct.normalizedCut, first.normalizedCut);
+        }
+    }
+}
+
+TEST(InterfaceNormalizedCutTest, ValueOfTwoCliques) {
+    // two 4-cliques joined by one edge: each clique has volume 2 * 6 + 1 = 13, and one edge leaves it
+    for (const deco::Backend backend : availableBackends()) {
+        SCOPED_TRACE(name(backend));
+        auto graph = makeGraph<Unweighted32>(8, twoCliques(4, 1));
+
+        const auto result = deco::normalizedCut(graph, 2, {.backend = backend});
+        EXPECT_EQ(result.numClusters, 2u);
+        EXPECT_DOUBLE_EQ(result.normalizedCut, 2.0 / 13);
     }
 }

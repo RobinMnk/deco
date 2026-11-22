@@ -138,10 +138,10 @@ TYPED_TEST(AlgorithmsTest, NormalizedCutGivesKConsistentClusters) {
         expectPartitionConsistent(partition, &snapshot);
         for (NodeIx c = 0; c < k; ++c) EXPECT_GT(partition.getCluster(c).size(), 0u) << "cluster " << c << " is empty";
 
-        // The top root keeps everything that was not split off, and gets the last label. Its remaining volume in the
-        // hierarchy must equal the volume of its cluster. (Regression test: split() used to subtract volumes also from
+        // The top root keeps everything that was not split off, and gets the last label. Its remaining volume
+        // must equal the volume of its cluster. (Regression test: split() used to subtract volumes also from
         // ancestors above the nearest root.)
-        EXPECT_EQ(hierarchy.lvl(top).volumes[0], partition.getCluster(k - 1).volume);
+        EXPECT_EQ(normalizedCut.remainingVolume(top, 0), partition.getCluster(k - 1).volume);
 
         if (::testing::Test::HasFailure()) return;
     }

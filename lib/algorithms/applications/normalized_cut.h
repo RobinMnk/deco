@@ -30,18 +30,21 @@ class NormalizedCut {
         frac_t penalty;
     };
 
-    Hierarchy* hierarchy;
+    const Hierarchy* hierarchy;
+    // volume and cut size of every tree node, per level, as the splits change them (the hierarchy stays unchanged)
+    std::vector<std::vector<EdgeWeight>> volumes;
+    std::vector<std::vector<EdgeWeight>> cutSizes;
     std::vector<NodeIx> labels;
     std::set<TreeNode> roots; // for some reason, hashing TreeNode is very annoying ... so using set instead
 
     [[nodiscard]]
     EdgeWeight volume(const TreeNode& tn) const {
-        return hierarchy->lvl(tn.level).volumes[tn.nix];
+        return volumes[tn.level][tn.nix];
     }
 
     [[nodiscard]]
     EdgeWeight cutSize(const TreeNode& tn) const {
-        return hierarchy->lvl(tn.level).cutSizes[tn.nix];
+        return cutSizes[tn.level][tn.nix];
     }
 
     /**
@@ -113,8 +116,9 @@ class NormalizedCut {
         while (lvlIdx + 1 < hierarchy->height()) {
             ++lvlIdx;
             NodeIx parent = hierarchy->lvl(lvlIdx).parents[child];
-            hierarchy->subtractVolume(lvlIdx, parent, volA);
-            hierarchy->addCut(lvlIdx, parent, cutA);
+            assert(volA <= volumes[lvlIdx][parent] && "volume would become negative");
+            volumes[lvlIdx][parent] -= volA;
+            cutSizes[lvlIdx][parent] += cutA;
 
             // tn belongs to the cluster of its nearest root ancestor. Ancestors above that root no longer
             // contain this cluster (its volume was already subtracted when the root was split off) -> stop here.
@@ -126,10 +130,16 @@ class NormalizedCut {
     }
 
 public:
-    explicit NormalizedCut(Hierarchy& eh) : hierarchy{&eh}, labels(eh.getNumNodes(), 0), roots() {}
+    explicit NormalizedCut(const Hierarchy& eh) : hierarchy{&eh}, labels(eh.getNumNodes(), 0), roots() {
+        for (NodeIx l = 0; l < eh.height(); ++l) {
+            volumes.push_back(eh.lvl(l).volumes);
+            cutSizes.push_back(eh.lvl(l).cutSizes);
+        }
+    }
 
     /**
-     * Splits the Graph into k clusters, minimizing the normalized cut objective. Adjusts the sparsifier accordingly and returns the resulting partition.
+     * Splits the Graph into k clusters, minimizing the normalized cut objective, and returns the resulting partition.
+     * The hierarchy does not change, so it can be used again.
      * @param k number of clusters
      */
     template<MutableGraph Graph>
@@ -172,14 +182,20 @@ public:
 
         Partition<Graph> part{G};
         std::vector<NodeIx> mod;
-        // This modifies the underlying graph, which invalidates the sparsifier.
+        // This reorders the adjacency lists of G; the hierarchy does not depend on them.
         // labels are not grouped by node order -> the cluster must be sorted by label (requiresSort = true)
         part.template splitByIndices<true, false>(0, labels, k, mod);
         return part;
     }
+
+    // Volume of a tree node that is left after compute() split off the clusters below it
+    [[nodiscard]]
+    EdgeWeight remainingVolume(NodeIx level, NodeIx nix) const {
+        return volumes[level][nix];
+    }
 };
 
 template<typename EdgeWeight>
-NormalizedCut(ExpanderHierarchy<EdgeWeight>&) -> NormalizedCut<EdgeWeight>;
+NormalizedCut(const ExpanderHierarchy<EdgeWeight>&) -> NormalizedCut<EdgeWeight>;
 
 #endif //RCUT_NORMALIZED_CUT_H

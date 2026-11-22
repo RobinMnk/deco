@@ -49,6 +49,11 @@ struct Decomposition : Clustering<EdgeWeight> {
     DecompositionStats stats;
 };
 
+template<class EdgeWeight>
+struct NormalizedCutClustering : Clustering<EdgeWeight> {
+    double normalizedCut = 0;        // its value, see normalizedCutValue
+};
+
 
 namespace detail {
 
@@ -178,15 +183,45 @@ ExpanderHierarchy<typename GraphT::EdgeWeight> expanderHierarchy(GraphT& graph, 
     );
 }
 
-// Partition into k clusters with a small normalized cut, derived from the congestion approximator of `graph`
+// Normalized cut value of a clustering of `graph`: the sum over all clusters of (weight of the edges leaving the
+// cluster) / (volume of the cluster). Clusters of volume 0 add nothing.
+template<GraphLike GraphT, class EdgeWeight>
+double normalizedCutValue(const GraphT& graph, const Clustering<EdgeWeight>& clustering) {
+    std::vector<double> cut(clustering.numClusters, 0), volume(clustering.numClusters, 0);
+    for (NodeIx v = 0; v < graph.numNodes; ++v) {
+        const NodeIx c = clustering.clusterOf[v];
+        for (EdgeIx eix = graph.startIndex(v); eix < graph.endIndex(v); ++eix) {
+            const double w = graph.edgeWeight(eix);
+            volume[c] += w;
+            if (clustering.clusterOf[graph.edges[eix]] != c) cut[c] += w;
+        }
+    }
+    double value = 0;
+    for (NodeIx c = 0; c < clustering.numClusters; ++c) {
+        if (volume[c] > 0) value += cut[c] / volume[c];
+    }
+    return value;
+}
+
+// Partition into k clusters with a small normalized cut, derived from a congestion approximator of `graph`
+// (expanderHierarchy). The hierarchy does not change, so one hierarchy serves any number of calls.
 template<MutableGraph GraphT>
-Clustering<typename GraphT::EdgeWeight> normalizedCut(GraphT& graph, NodeIx k, const Options& options = {}) {
-    auto hierarchy = expanderHierarchy(graph, options);
+NormalizedCutClustering<typename GraphT::EdgeWeight> normalizedCut(
+    GraphT& graph, const ExpanderHierarchy<typename GraphT::EdgeWeight>& hierarchy, NodeIx k) {
+    if (hierarchy.getNumNodes() != graph.numNodes) throw std::invalid_argument("deco: the hierarchy is not one of this graph");
     NormalizedCut ncut{hierarchy};
 
-    Clustering<typename GraphT::EdgeWeight> result;
+    NormalizedCutClustering<typename GraphT::EdgeWeight> result;
     detail::assign(result, ncut.compute(graph, k));
+    result.normalizedCut = normalizedCutValue(graph, result);
     return result;
+}
+
+// The same, with a new congestion approximator of `graph`
+template<MutableGraph GraphT>
+NormalizedCutClustering<typename GraphT::EdgeWeight> normalizedCut(GraphT& graph, NodeIx k, const Options& options = {}) {
+    const auto hierarchy = expanderHierarchy(graph, options);
+    return normalizedCut(graph, hierarchy, k);
 }
 
 } // namespace deco

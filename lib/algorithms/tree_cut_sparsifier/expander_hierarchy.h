@@ -157,7 +157,7 @@ public:
     template<typename T>
     double predict(const T& demands) const;
 
-    size_t height() {
+    size_t height() const {
         return levels.size();
     }
 
@@ -172,15 +172,6 @@ public:
     [[nodiscard]]
     std::span<const NodeIx> children(NodeIx l, NodeIx parent) const {
         return levels[l].childrenOf(parent);
-    }
-
-    void subtractVolume(NodeIx l, NodeIx nix, EdgeWeight vol) {
-        assert(vol <= levels[l].volumes[nix] && "volume would become negative");
-        levels[l].volumes[nix] -= vol;
-    }
-
-    void addCut(NodeIx l, NodeIx nix, EdgeWeight cut) {
-        levels[l].cutSizes[nix] += cut;
     }
 };
 
