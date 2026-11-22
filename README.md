@@ -1,7 +1,12 @@
 # Deco: Graph Decomposition Library
 
 [![Tests](https://github.com/RobinMnk/deco/actions/workflows/tests.yml/badge.svg)](https://github.com/RobinMnk/deco/actions/workflows/tests.yml)
-[![Paper](https://img.shields.io/badge/DOI-10.1145%2F3816782.3819180-blue)](https://doi.org/10.1145/3816782.3819180)
+[![SPAA2026](https://img.shields.io/badge/DOI-10.1145%2F3816782.3819180-blue)](https://doi.org/10.1145/3816782.3819180)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![C++20](https://img.shields.io/badge/C%2B%2B-20-00599C?logo=cplusplus&logoColor=white)](#building-and-testing)
+[![CUDA 12](https://img.shields.io/badge/CUDA-12-76B900?logo=nvidia&logoColor=white)](#building-and-testing)
+[![Python 3.10+](https://img.shields.io/badge/Python-3.10%2B-3776AB?logo=python&logoColor=white)](#python)
+[![CMake 3.18+](https://img.shields.io/badge/CMake-3.18%2B-064F8C?logo=cmake&logoColor=white)](#building-and-testing)
 
 **Deco** is a C++ library for computing graph decompositions based on algorithms with provable guarantees.
 It provides scalable implementations for computing
@@ -286,4 +291,4 @@ If you use Deco in academic work, please cite:
 
 ## License
 
-<!-- TODO: choose a license and add a LICENSE file -->
+Deco is released under the [MIT License](LICENSE).
